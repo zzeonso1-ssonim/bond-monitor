@@ -7,7 +7,7 @@ import {
 import {
   loadSpreadSeries, loadMarket, loadRegimeStats, loadWebMeta,
   loadKrxFutures, loadKrxCorp, loadDartOfferings, loadDartDetails,
-  loadInvestorFlows,
+  loadInvestorFlows, loadFuturesForeign,
 } from "./api.js";
 import { lineChart, regimeRangeChart, dualSpreadChart, barChart } from "./charts.js";
 
@@ -17,7 +17,7 @@ const $ = (sel, root = document) => root.querySelector(sel);
 const S = {
   series: new Map(), market: new Map(),
   stats: { regime: new Map(), rv: new Map(), xcurve: new Map() },
-  futures: [], corp: [], dart: [], dartDetails: [], flows: [],
+  futures: [], corp: [], dart: [], dartDetails: [], flows: [], futFrg: [],
   asof: "",
 };
 
@@ -861,6 +861,13 @@ function renderWeekly() {
     <div class="table-scroll"><table class="data">
       <thead><tr><th>상품</th><th>종목</th><th>종가</th><th>전일비</th><th>주간변동</th><th>미결제약정</th><th>거래량</th></tr></thead>
       <tbody id="wk-fut"></tbody></table></div>
+    <div class="section-title">외국인 국채선물 순매수</div>
+    <p class="section-sub" id="wk-frg-sub">KRX 파생 투자자별 거래실적 · 계약 수 기준</p>
+    <div class="tile-row" id="wk-frg-tiles"></div>
+    <div class="card">
+      <div class="card-head"><h2>연초 이후 누적 순매수</h2><span class="hint">계약</span></div>
+      <div id="wk-frg-chart"></div>
+    </div>
     <div class="section-title">시장지표 주간</div>
     <div class="table-scroll"><table class="data">
       <thead><tr><th>지표</th><th>종가</th><th>전일비</th><th>주간변동률(%)</th></tr></thead>
@@ -922,6 +929,58 @@ function renderWeekly() {
       futBody.appendChild(tr);
     }
     if (!futBody.children.length) hintRow(futBody, 7, "데이터 적재 중");
+  }
+
+  // 3) 외국인 국채선물 순매수 — 일별(계약) 타일 + 연초 누적 라인차트
+  {
+    const bySym = new Map();
+    for (const r of S.futFrg) {
+      if (!bySym.has(r.symbol)) bySym.set(r.symbol, []);
+      bySym.get(r.symbol).push(r); // trade_date 오름차순 로드
+    }
+    const tiles = $("#wk-frg-tiles", root);
+    const chartSeries = [];
+    const defs = [
+      { sym: "KTB3F_FRG", name: "3년 국채선물", cssVar: "--series-1" },
+      { sym: "KTB10F_FRG", name: "10년 국채선물", cssVar: "--series-6" },
+    ];
+    let hasAny = false;
+    for (const def of defs) {
+      const rows = bySym.get(def.sym) || [];
+      if (!rows.length) continue;
+      hasAny = true;
+      const last = rows[rows.length - 1];
+      let cum = 0;
+      const points = rows.map((r) => ({ d: r.trade_date, v: (cum += r.value) }));
+      chartSeries.push({ name: def.name, cssVar: def.cssVar, points });
+      const tile = document.createElement("div");
+      tile.className = "tile";
+      const lab = document.createElement("div");
+      lab.className = "t-label";
+      lab.textContent = `${def.name} (${last.trade_date.slice(5).replace("-", "/")})`;
+      const val = document.createElement("div");
+      val.className = "t-value";
+      val.textContent = intSigned(last.value);
+      const u = document.createElement("span");
+      u.className = "unit";
+      u.textContent = "계약";
+      val.appendChild(u);
+      const del = document.createElement("div");
+      del.className = "t-delta";
+      del.append("연초 누적 ", intDeltaSpan(cum));
+      tile.append(lab, val, del);
+      tiles.appendChild(tile);
+    }
+    if (hasAny) {
+      const latest = S.futFrg[S.futFrg.length - 1]?.trade_date;
+      $("#wk-frg-sub", root).textContent = `KRX 파생 투자자별 거래실적 · 계약 수 기준 · 기준일 ${latest}`;
+      lineChart($("#wk-frg-chart", root), chartSeries, { unit: "계약", digits: 0, zeroLine: true });
+    } else {
+      const p = document.createElement("p");
+      p.className = "hint";
+      p.textContent = "데이터 적재 준비 중";
+      tiles.appendChild(p);
+    }
   }
 
   // 4) 시장지표 주간 — 접이식과 동일 로직, 항상 펼침
@@ -1446,10 +1505,10 @@ function renderFlows() {
 /* ══════════════ 부트스트랩 ══════════════ */
 async function main() {
   try {
-    const [series, market, stats, meta, futures, corp, dart, dartDetails, flows] = await Promise.all([
+    const [series, market, stats, meta, futures, corp, dart, dartDetails, flows, futFrg] = await Promise.all([
       loadSpreadSeries(), loadMarket(), loadRegimeStats(), loadWebMeta(),
       loadKrxFutures(30), loadKrxCorp(35), loadDartOfferings(90),
-      loadDartDetails(7), loadInvestorFlows(200),
+      loadDartDetails(7), loadInvestorFlows(200), loadFuturesForeign(),
     ]);
     S.series = series;
     S.market = market;
@@ -1459,6 +1518,7 @@ async function main() {
     S.dart = dart;
     S.dartDetails = dartDetails;
     S.flows = flows;
+    S.futFrg = futFrg;
 
     // 기준일 — 스프레드 데이터 최신 일자 (없으면 시장지표 최신 일자)
     let asof = "";

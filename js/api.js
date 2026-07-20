@@ -102,6 +102,16 @@ export function loadInvestorFlows(days = 95) {
   );
 }
 
+// 외국인 국채선물 일별 순매수(계약) — market_daily 심볼 KTB3F_FRG(3년)/KTB10F_FRG(10년), 연초부터
+// 소스: KRX 정보데이터시스템 통계(로그인 세션 필요) → 수집 절차는 bond-spread-system WORKLOG 참조
+export function loadFuturesForeign() {
+  const jan1 = `${new Date().getFullYear()}-01-01`;
+  return fetchRecentSafe(
+    "market_daily?select=trade_date,symbol,value&symbol=in.(KTB3F_FRG,KTB10F_FRG)" +
+      `&trade_date=gte.${jan1}&order=trade_date.asc`
+  );
+}
+
 // DART 채무증권 발행 공시 (rcept_dt 내림차순) — 테이블이 비어 있으면 빈 배열
 export function loadDartOfferings(days = 90) {
   return fetchRecentSafe(
