@@ -6,7 +6,7 @@ import {
 } from "./config.js";
 import {
   loadSpreadSeries, loadMarket, loadRegimeStats, loadWebMeta,
-  loadKrxFutures, loadKrxGovt, loadKrxCorp, loadDartOfferings,
+  loadKrxFutures, loadKrxGovt, loadKrxCorp, loadDartOfferings, loadDartDetails,
   loadInvestorFlows,
 } from "./api.js";
 import { lineChart, regimeRangeChart, dualSpreadChart } from "./charts.js";
@@ -17,7 +17,7 @@ const $ = (sel, root = document) => root.querySelector(sel);
 const S = {
   series: new Map(), market: new Map(),
   stats: { regime: new Map(), rv: new Map(), xcurve: new Map() },
-  futures: [], govt: [], corp: [], dart: [], flows: [],
+  futures: [], govt: [], corp: [], dart: [], dartDetails: [], flows: [],
   asof: "",
 };
 
@@ -1231,9 +1231,81 @@ function fmtRceptDt(v) {
 function renderOfferings() {
   const root = $("#view-offerings");
   root.innerHTML = `
+    <div class="section-title">수요예측·발행조건 (신고서 파싱)</div>
+    <p class="section-sub">증권신고서(채무증권) 회차별 · 최근 90일 · 발행액 억원</p>
+    <div id="of-details"></div>
+    <div class="section-title">발행 공시 목록</div>
     <p class="section-sub">DART 채무증권 발행 공시 · 최근 90일</p>
-    <div id="of-body"></div>
-    <p class="hint">수요예측 밴드·주관사 상세는 2차(신고서 본문 파싱) 예정</p>`;
+    <div id="of-body"></div>`;
+
+  // ── 파싱 상세 표 (dart_offering_details) ──
+  const det = $("#of-details", root);
+  if (!S.dartDetails.length) {
+    const p = document.createElement("p");
+    p.className = "hint";
+    p.textContent = "신고서 파싱 데이터 적재 준비 중 (sync_dart_details 실행 후 표시됩니다)";
+    det.appendChild(p);
+  } else {
+    const urlByRcept = new Map(S.dart.map((r) => [r.rcept_no, r.url]));
+    const scroll = document.createElement("div");
+    scroll.className = "table-scroll";
+    const table = document.createElement("table");
+    table.className = "data";
+    const thead = document.createElement("thead");
+    const hr = document.createElement("tr");
+    for (const h of ["접수일", "회사명", "회차", "등급", "발행액(억)", "상환기일", "수요예측일", "청약일", "공모희망금리", "주관·인수"]) {
+      const th = document.createElement("th");
+      th.textContent = h;
+      hr.appendChild(th);
+    }
+    thead.appendChild(hr);
+    const tbody = document.createElement("tbody");
+    for (const r of S.dartDetails) {
+      const tr = document.createElement("tr");
+      const dt = document.createElement("td");
+      dt.textContent = fmtRceptDt(r.rcept_dt);
+      tr.appendChild(dt);
+      const nm = document.createElement("td");
+      const url = String(urlByRcept.get(r.rcept_no) || "");
+      if (/^https?:\/\//.test(url)) {
+        const a = document.createElement("a");
+        a.href = url;
+        a.target = "_blank";
+        a.rel = "noopener";
+        a.textContent = r.corp_name ?? "—";
+        nm.appendChild(a);
+      } else {
+        nm.textContent = r.corp_name ?? "—";
+      }
+      tr.appendChild(nm);
+      for (const v of [r.tranche, r.rating]) {
+        const td = document.createElement("td");
+        td.textContent = v ?? "—";
+        tr.appendChild(td);
+      }
+      const amt = document.createElement("td");
+      amt.textContent = r.amount == null ? "—"
+        : (r.amount / 1e8).toLocaleString("ko-KR", { maximumFractionDigits: 0 });
+      tr.appendChild(amt);
+      for (const v of [r.maturity_date, r.demand_date, r.sub_date, r.band]) {
+        const td = document.createElement("td");
+        td.textContent = v ?? "—";
+        tr.appendChild(td);
+      }
+      // 주관·인수 — 3사 초과는 "외 n" 축약 (전체는 title 툴팁)
+      const uw = document.createElement("td");
+      const names = (r.underwriters || "").split(",").map((s) => s.trim()).filter(Boolean);
+      uw.textContent = !names.length ? "—"
+        : names.length <= 3 ? names.join(", ") : `${names.slice(0, 3).join(", ")} 외 ${names.length - 3}`;
+      if (names.length > 3) uw.title = names.join(", ");
+      tr.appendChild(uw);
+      tbody.appendChild(tr);
+    }
+    table.append(thead, tbody);
+    scroll.appendChild(table);
+    det.appendChild(scroll);
+  }
+
   const box = $("#of-body", root);
 
   if (!S.dart.length) {
@@ -1432,10 +1504,10 @@ function renderFlows() {
 /* ══════════════ 부트스트랩 ══════════════ */
 async function main() {
   try {
-    const [series, market, stats, meta, futures, govt, corp, dart, flows] = await Promise.all([
+    const [series, market, stats, meta, futures, govt, corp, dart, dartDetails, flows] = await Promise.all([
       loadSpreadSeries(), loadMarket(), loadRegimeStats(), loadWebMeta(),
       loadKrxFutures(95), loadKrxGovt(95), loadKrxCorp(10), loadDartOfferings(90),
-      loadInvestorFlows(95),
+      loadDartDetails(90), loadInvestorFlows(95),
     ]);
     S.series = series;
     S.market = market;
@@ -1444,6 +1516,7 @@ async function main() {
     S.govt = govt;
     S.corp = corp;
     S.dart = dart;
+    S.dartDetails = dartDetails;
     S.flows = flows;
 
     // 기준일 — 스프레드 데이터 최신 일자 (없으면 시장지표 최신 일자)

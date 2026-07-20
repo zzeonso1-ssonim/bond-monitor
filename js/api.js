@@ -110,6 +110,15 @@ export function loadDartOfferings(days = 90) {
   );
 }
 
+// DART 신고서 파싱 결과 — 회차별 발행조건 (테이블 미생성·미적재 시 빈 배열)
+export function loadDartDetails(days = 90) {
+  return fetchRecentSafe(
+    "dart_offering_details?select=rcept_no,tranche,corp_name,rcept_dt,amount,coupon," +
+      "maturity_date,sub_date,pay_date,demand_date,band,rating,underwriters" +
+      `&rcept_dt=gte.${sinceISO(days)}&order=rcept_dt.desc,rcept_no.desc,tranche.asc`
+  );
+}
+
 // bond_regime_stats → kind별 Map(label -> rows[bucket_order 오름차순])
 export async function loadRegimeStats() {
   const rows = await fetchPaged(
