@@ -118,3 +118,21 @@ export const MARKET_TABLE = [
 
 // 카테고리 색상 슬롯(고정 순서 — 필터와 무관하게 지표당 고정)
 export const SLOT_VARS = ["--series-1", "--series-2", "--series-3", "--series-4", "--series-5", "--series-6"];
+
+// 수급동향 — kofia_investor_flows 컬럼 ↔ 표시명 (표 행 순서).
+// DB 스키마 매핑이므로 web_meta 대상 아님. chart=true 는 누적 추이 차트 기본 표시 투자자.
+export const FLOW_INVESTORS = [
+  { key: "bank", name: "은행", chart: true },
+  { key: "amc_public", name: "자산운용(공모)", chart: true },
+  { key: "amc_private", name: "자산운용(사모)" },
+  { key: "insurance", name: "보험", chart: true },
+  { key: "fund_pension", name: "기금·공제", chart: true },
+  { key: "foreigner", name: "외국인", chart: true },
+  { key: "merchant_mutual", name: "종금·상호" },
+  { key: "futures_co", name: "선물" },
+  { key: "government", name: "국가·지자체" },
+  { key: "other_corp", name: "기타법인" },
+  { key: "individual", name: "개인" },
+];
+// 매트릭스 표 열 순서 (kofia_investor_flows.bond_class 값 그대로)
+export const FLOW_CLASSES = ["합계", "국채", "통안증권", "지방채", "특수채", "은행채", "기타금융채", "회사채", "ABS"];

@@ -24,6 +24,7 @@
   - `web_meta` — 화면 구성 메타 `{key: 'bond-monitor', payload jsonb}` (아래 참고)
   - `krx_futures_daily` / `krx_govt_daily` / `krx_corp_daily` — KRX 국채선물·장내 국채·일반채권시장 일별
   - `dart_offerings` — DART 채무증권 발행 공시 (DART_API_KEY 등록 후 적재)
+  - `kofia_investor_flows` — KOFIA 투자자별 거래현황 `{trade_date, trade_type, bond_class, 투자자 13컬럼}` (억원)
 
 ## 화면 구성 소스 — 하드코딩 금지 원칙
 
@@ -60,7 +61,7 @@ python3 -m http.server 8000
 | 주간 채권시장 | 주간 스냅샷 — 채권시장종합(국고·통안 전주/전월비) + 국채선물(근월물) + 장내 국채 지표물·BEI + 시장지표 주간 |
 | 거래현황 | KRX 일반채권시장 장내 체결 — 여전채/회사채 거래대금 상위 15 + 수익률 변동 상위(강세/약세 10) |
 | 발행정보 | DART 채무증권 발행 공시 최근 90일 (DART_API_KEY 등록 후 자동 수집) |
-| 수급동향 | KOFIA 투자자별 매매동향 — 데이터 소스 연결 준비 중 |
+| 수급동향 | KOFIA 투자자별 거래현황(장외 거래대금, 억원) — 주요 투자자 타일(당일 순매수+20일 누적) + 투자자×채권종류 순매수 표 + 누적 순매수 추이 차트(3개월, 채권종류 선택) |
 
 색 관례: 상승(확대) = 빨강(`--up`), 하락(축소) = 파랑(`--dn`) — 국내 관례.
 테마는 시스템 → 다크 → 라이트 순환 토글(우상단 ◐), localStorage 에 저장된다.

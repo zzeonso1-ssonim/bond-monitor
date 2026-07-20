@@ -92,6 +92,16 @@ export function loadKrxCorp(days = 10) {
   );
 }
 
+// KOFIA 투자자별 거래현황(수급동향, 억원) — 테이블 미생성·미적재 시 빈 배열
+export function loadInvestorFlows(days = 95) {
+  return fetchRecentSafe(
+    "kofia_investor_flows?select=trade_date,trade_type,bond_class,total,brokered,bank," +
+      "amc_public,amc_private,futures_co,insurance,merchant_mutual,fund_pension," +
+      "foreigner,government,other_corp,individual" +
+      `&trade_date=gte.${sinceISO(days)}&order=trade_date.asc`
+  );
+}
+
 // DART 채무증권 발행 공시 (rcept_dt 내림차순) — 테이블이 비어 있으면 빈 배열
 export function loadDartOfferings(days = 90) {
   return fetchRecentSafe(

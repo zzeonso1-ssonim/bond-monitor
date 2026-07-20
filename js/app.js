@@ -2,10 +2,12 @@
 import {
   MONITOR_GROUPS, MATRIX_GROUPS, XCURVE_DEFS, RV_DEFS,
   REGIME_LABELS, MARKET_SYMBOLS, MARKET_TABLE, SLOT_VARS,
+  FLOW_INVESTORS, FLOW_CLASSES,
 } from "./config.js";
 import {
   loadSpreadSeries, loadMarket, loadRegimeStats, loadWebMeta,
   loadKrxFutures, loadKrxGovt, loadKrxCorp, loadDartOfferings,
+  loadInvestorFlows,
 } from "./api.js";
 import { lineChart, regimeRangeChart, dualSpreadChart } from "./charts.js";
 
@@ -15,7 +17,7 @@ const $ = (sel, root = document) => root.querySelector(sel);
 const S = {
   series: new Map(), market: new Map(),
   stats: { regime: new Map(), rv: new Map(), xcurve: new Map() },
-  futures: [], govt: [], corp: [], dart: [],
+  futures: [], govt: [], corp: [], dart: [], flows: [],
   asof: "",
 };
 
@@ -1158,23 +1160,154 @@ function renderOfferings() {
   box.appendChild(scroll);
 }
 
-/* ══════════════ 수급동향 (준비 중) ══════════════ */
+/* ══════════════ 수급동향 (KOFIA 투자자별 거래현황) ══════════════ */
+const intSigned = (v) => {
+  if (v == null || Number.isNaN(v)) return "—";
+  const s = Math.round(Math.abs(v)).toLocaleString("ko-KR");
+  return v > 0 ? `+${s}` : v < 0 ? `−${s}` : "0";
+};
+// 부호 색·콤마 있는 정수 셀 (억원)
+function intTd(v) {
+  const td = document.createElement("td");
+  td.textContent = intSigned(v);
+  if (v != null && v > 0) td.className = "pos";
+  else if (v != null && v < 0) td.className = "neg";
+  return td;
+}
+// 부호 색·콤마 있는 정수 스팬 (타일 보조 텍스트용)
+function intDeltaSpan(v) {
+  const sp = document.createElement("span");
+  sp.textContent = intSigned(v);
+  if (v != null && v > 0) sp.className = "delta-up";
+  else if (v != null && v < 0) sp.className = "delta-dn";
+  return sp;
+}
+
 function renderFlows() {
   const root = $("#view-flows");
   root.innerHTML = `
+    <p class="section-sub" id="fl-sub"></p>
+    <p class="hint">KOFIA 채권정보센터 투자자별 거래현황(장외) · 거래대금 순매수 기준 · 단위 억원</p>
+    <div class="tile-row" id="fl-tiles"></div>
+    <div class="section-title">투자자 × 채권종류 순매수</div>
+    <div class="table-scroll" id="fl-matrix"></div>
     <div class="card">
-      <div class="card-head"><h2>주요 투자자 수급동향</h2></div>
-      <p class="hint">KOFIA 채권정보센터 투자자별 매매동향 데이터 소스 연결 준비 중입니다.
-      연결되면 외국인·보험기금·은행·투신의 채권종류·만기별 순매수가 이 탭에 표시됩니다.</p>
+      <div class="card-head">
+        <h2>누적 순매수 추이</h2><span class="hint">최근 3개월 · 억원</span><span class="spacer"></span>
+        <div class="controls"><select class="ctl" id="fl-class"></select></div>
+      </div>
+      <div id="fl-chart"></div>
     </div>`;
+
+  const net = S.flows.filter((r) => r.trade_type === "순매수");
+  if (!net.length) {
+    const p = document.createElement("p");
+    p.className = "hint";
+    p.textContent = "데이터 적재 준비 중 (bond-spread-system sync_investor_flows 실행 후 표시됩니다)";
+    $("#fl-matrix", root).appendChild(p);
+    return;
+  }
+
+  const dates = distinctDates(net);
+  const latest = dates[dates.length - 1];
+  $("#fl-sub", root).textContent = `기준일 ${latest}`;
+  const todays = net.filter((r) => r.trade_date === latest);
+  const byClassToday = new Map(todays.map((r) => [r.bond_class, r]));
+
+  // 합계(전 채권종류) 일별 시계열 — 타일·차트 공용
+  const sumSeries = net.filter((r) => r.bond_class === "합계");
+
+  // 타일: 주요 투자자 당일 순매수 + 20영업일 누적
+  const tiles = $("#fl-tiles", root);
+  const last20 = new Set(dates.slice(-20));
+  for (const inv of FLOW_INVESTORS.filter((i) => i.chart)) {
+    const cur = byClassToday.get("합계")?.[inv.key] ?? null;
+    let cum = 0, has = false;
+    for (const r of sumSeries) {
+      if (last20.has(r.trade_date) && r[inv.key] != null) { cum += r[inv.key]; has = true; }
+    }
+    const tile = document.createElement("div");
+    tile.className = "tile";
+    const lab = document.createElement("div");
+    lab.className = "t-label";
+    lab.textContent = inv.name;
+    const val = document.createElement("div");
+    val.className = "t-value";
+    val.textContent = intSigned(cur);
+    if (cur != null) {
+      const u = document.createElement("span");
+      u.className = "unit";
+      u.textContent = "억";
+      val.appendChild(u);
+    }
+    const del = document.createElement("div");
+    del.className = "t-delta";
+    del.append("20일 누적 ", intDeltaSpan(has ? cum : null));
+    tile.append(lab, val, del);
+    tiles.appendChild(tile);
+  }
+
+  // 매트릭스 표: 행=투자자(+전체), 열=채권종류 — 당일 순매수(억원)
+  const table = document.createElement("table");
+  table.className = "data";
+  const thead = document.createElement("thead");
+  const hr = document.createElement("tr");
+  for (const h of ["투자자", ...FLOW_CLASSES]) {
+    const th = document.createElement("th");
+    th.textContent = h;
+    hr.appendChild(th);
+  }
+  thead.appendChild(hr);
+  const tbody = document.createElement("tbody");
+  const addRow = (name, get) => {
+    const tr = document.createElement("tr");
+    const nm = document.createElement("td");
+    nm.textContent = name;
+    tr.appendChild(nm);
+    for (const cls of FLOW_CLASSES) {
+      const r = byClassToday.get(cls);
+      tr.appendChild(intTd(r ? get(r) : null));
+    }
+    tbody.appendChild(tr);
+  };
+  for (const inv of FLOW_INVESTORS) addRow(inv.name, (r) => r[inv.key]);
+  addRow("전체", (r) => r.total);
+  table.append(thead, tbody);
+  $("#fl-matrix", root).appendChild(table);
+
+  // 누적 순매수 추이 — 채권종류 선택(기본 합계), 주요 투자자 누적합 라인
+  const sel = $("#fl-class", root);
+  for (const cls of FLOW_CLASSES) {
+    const op = document.createElement("option");
+    op.value = cls;
+    op.textContent = cls === "합계" ? "전체 채권" : cls;
+    sel.appendChild(op);
+  }
+  const drawChart = () => {
+    const rows = net.filter((r) => r.bond_class === sel.value);
+    const series = FLOW_INVESTORS.filter((i) => i.chart).map((inv, idx) => {
+      let cum = 0;
+      const points = [];
+      for (const r of rows) {
+        if (r[inv.key] == null) continue;
+        cum += r[inv.key];
+        points.push({ d: r.trade_date, v: cum });
+      }
+      return { name: inv.name, cssVar: SLOT_VARS[idx % SLOT_VARS.length], points };
+    });
+    lineChart($("#fl-chart", root), series, { unit: "억", digits: 0, zeroLine: true });
+  };
+  sel.addEventListener("change", drawChart);
+  drawChart();
 }
 
 /* ══════════════ 부트스트랩 ══════════════ */
 async function main() {
   try {
-    const [series, market, stats, meta, futures, govt, corp, dart] = await Promise.all([
+    const [series, market, stats, meta, futures, govt, corp, dart, flows] = await Promise.all([
       loadSpreadSeries(), loadMarket(), loadRegimeStats(), loadWebMeta(),
       loadKrxFutures(30), loadKrxGovt(30), loadKrxCorp(10), loadDartOfferings(90),
+      loadInvestorFlows(95),
     ]);
     S.series = series;
     S.market = market;
@@ -1183,6 +1316,7 @@ async function main() {
     S.govt = govt;
     S.corp = corp;
     S.dart = dart;
+    S.flows = flows;
 
     // 기준일 — 스프레드 데이터 최신 일자 (없으면 시장지표 최신 일자)
     let asof = "";
