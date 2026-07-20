@@ -7,7 +7,7 @@ import {
 import {
   loadSpreadSeries, loadMarket, loadRegimeStats, loadWebMeta,
   loadKrxFutures, loadKrxCorp, loadDartOfferings, loadDartDetails,
-  loadInvestorFlows, loadFuturesForeign, loadIssueStats,
+  loadInvestorFlows, loadFuturesForeign, loadIssueStats, loadIssueMonthly,
 } from "./api.js";
 import { lineChart, regimeRangeChart, dualSpreadChart, barChart } from "./charts.js";
 
@@ -17,7 +17,7 @@ const $ = (sel, root = document) => root.querySelector(sel);
 const S = {
   series: new Map(), market: new Map(),
   stats: { regime: new Map(), rv: new Map(), xcurve: new Map() },
-  futures: [], corp: [], dart: [], dartDetails: [], flows: [], futFrg: [], issue: [],
+  futures: [], corp: [], dart: [], dartDetails: [], flows: [], futFrg: [], issue: [], issueMonthly: [],
   asof: "",
 };
 
@@ -861,7 +861,12 @@ function renderIssue() {
     <p class="section-sub" id="wk-mat-sub">억원 · 금주 실적 + 향후 2주 예정</p>
     <div class="table-scroll"><table class="data">
       <thead><tr><th>채권종류</th><th>금주</th><th>다음주</th><th>다다음주</th></tr></thead>
-      <tbody id="wk-mat"></tbody></table></div>`;
+      <tbody id="wk-mat"></tbody></table></div>
+    <div class="card">
+      <div class="card-head"><h2 id="is-chart-title">월별 순발행 (최근 1년)</h2><span class="hint">억원 · 당월은 진행분</span></div>
+      <div class="controls"><div class="seg wrap" id="is-cls"></div></div>
+      <div id="is-chart"></div>
+    </div>`;
 
   // 4) 발행통계(금주 vs 전주) + 만기통계(금주·향후 2주) — kofia_issue_stats
   {
@@ -937,6 +942,49 @@ function renderIssue() {
     }
   }
 
+  // 월별 순발행 막대그래프 (최근 1년) — 채권종류 세그 버튼으로 전환
+  {
+    const CLS_BTNS = ["계", "국채", "지방채", "특수채", "통안증권", "은행채", "기타금융채", "회사채", "ABS"];
+    const seg = $("#is-cls", root);
+    for (const cls of CLS_BTNS) {
+      const b = document.createElement("button");
+      b.dataset.cls = cls;
+      b.textContent = cls === "계" ? "전체" : cls;
+      if (cls === "계") b.className = "active";
+      seg.appendChild(b);
+    }
+    const draw = (cls) => {
+      // 월별 합산 — 마지막 13개 키 중 최근 12개월
+      const byMonth = new Map();
+      for (const r of S.issueMonthly) {
+        if (r.bond_class !== cls || r.net == null) continue;
+        const k = r.stat_date.slice(0, 7);
+        byMonth.set(k, (byMonth.get(k) ?? 0) + r.net);
+      }
+      const keys = [...byMonth.keys()].sort().slice(-12);
+      const cats = keys.map((k) => `${k.slice(2, 4)}.${k.slice(5, 7)}`);
+      $("#is-chart-title", root).textContent =
+        `월별 순발행 (최근 1년) — ${cls === "계" ? "전체" : cls}`;
+      barChart($("#is-chart", root), cats,
+        [{ name: cls === "계" ? "전체 순발행" : `${cls} 순발행`, cssVar: "--series-2",
+           values: keys.map((k) => byMonth.get(k)) }],
+        { unit: "억" });
+    };
+    if (!S.issueMonthly.length) {
+      const p = document.createElement("p");
+      p.className = "hint";
+      p.textContent = "데이터 적재 준비 중";
+      $("#is-chart", root).appendChild(p);
+    } else {
+      seg.addEventListener("click", (e) => {
+        const btn = e.target.closest("button");
+        if (!btn) return;
+        for (const b of seg.querySelectorAll("button")) b.classList.toggle("active", b === btn);
+        draw(btn.dataset.cls);
+      });
+      draw("계");
+    }
+  }
 }
 
 /* ══════════════ 거래현황 (KRX 일반채권시장) ══════════════ */
@@ -1569,10 +1617,11 @@ function renderFlows() {
 /* ══════════════ 부트스트랩 ══════════════ */
 async function main() {
   try {
-    const [series, market, stats, meta, futures, corp, dart, dartDetails, flows, futFrg, issue] = await Promise.all([
+    const [series, market, stats, meta, futures, corp, dart, dartDetails, flows, futFrg, issue, issueMonthly] = await Promise.all([
       loadSpreadSeries(), loadMarket(), loadRegimeStats(), loadWebMeta(),
       loadKrxFutures(30), loadKrxCorp(35), loadDartOfferings(90),
       loadDartDetails(7), loadInvestorFlows(200), loadFuturesForeign(), loadIssueStats(),
+      loadIssueMonthly(),
     ]);
     S.series = series;
     S.market = market;
@@ -1584,6 +1633,7 @@ async function main() {
     S.flows = flows;
     S.futFrg = futFrg;
     S.issue = issue;
+    S.issueMonthly = issueMonthly;
 
     // 기준일 — 스프레드 데이터 최신 일자 (없으면 시장지표 최신 일자)
     let asof = "";

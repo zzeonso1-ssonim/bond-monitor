@@ -112,6 +112,17 @@ export function loadIssueStats() {
   );
 }
 
+// 월별 순발행 차트용 — 최근 13개월 발행행(net)만 (만기행 제외)
+export function loadIssueMonthly() {
+  const from = new Date();
+  from.setMonth(from.getMonth() - 12);
+  from.setDate(1);
+  return fetchRecentSafe(
+    "kofia_issue_stats?select=stat_date,bond_class,net&net=not.is.null" +
+      `&stat_date=gte.${from.toISOString().slice(0, 10)}&order=stat_date.asc`
+  );
+}
+
 // 외국인 국채선물 일별 순매수(계약) — market_daily 심볼 KTB3F_FRG(3년)/KTB10F_FRG(10년), 연초부터
 // 소스: KRX 정보데이터시스템 통계(로그인 세션 필요) → 수집 절차는 bond-spread-system WORKLOG 참조
 export function loadFuturesForeign() {

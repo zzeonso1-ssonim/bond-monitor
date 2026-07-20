@@ -258,6 +258,8 @@ table.data td.mx-cell.selected { outline: 2px solid var(--series-1); outline-off
 .mx-sub { font-size: 11px; margin-left: 4px; }
 
 .seg button:disabled { opacity: 0.4; cursor: default; }
+.seg.wrap { flex-wrap: wrap; }
+.seg.wrap button { border-left: 1px solid var(--border); }
 
 .note {
   border-left: 3px solid var(--accent); background: var(--accent-wash);
