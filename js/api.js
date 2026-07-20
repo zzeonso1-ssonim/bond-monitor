@@ -58,6 +58,48 @@ export async function loadMarket() {
   return by;
 }
 
+// 최근 N일 범위 조회 공통 — 실패·테이블 미생성 시 빈 배열 (콘솔 에러 없이 폴백)
+async function fetchRecentSafe(path) {
+  try {
+    return await fetchPaged(path);
+  } catch {
+    return [];
+  }
+}
+const sinceISO = (days) => new Date(Date.now() - days * 86400 * 1000).toISOString().slice(0, 10);
+
+// KRX 국채선물 일별 (근월물 판별은 화면에서 volume 기준)
+export function loadKrxFutures(days = 30) {
+  return fetchRecentSafe(
+    "krx_futures_daily?select=trade_date,isu_cd,isu_nm,prod,close_price,change,settle,open_int,volume" +
+      `&trade_date=gte.${sinceISO(days)}&order=trade_date.asc`
+  );
+}
+
+// KRX 장내 국고채 일별 (지표물·물가채 포함)
+export function loadKrxGovt(days = 30) {
+  return fetchRecentSafe(
+    "krx_govt_daily?select=trade_date,isu_cd,isu_nm,tenor,bench_type,is_inflation,close_yield,volume" +
+      `&trade_date=gte.${sinceISO(days)}&order=trade_date.asc`
+  );
+}
+
+// KRX 일반채권시장 전 종목 일별 (회사채·여전채 체결)
+export function loadKrxCorp(days = 10) {
+  return fetchRecentSafe(
+    "krx_corp_daily?select=trade_date,isu_cd,isu_nm,close_yield,high_yield,low_yield,close_price,volume,value" +
+      `&trade_date=gte.${sinceISO(days)}&order=trade_date.asc`
+  );
+}
+
+// DART 채무증권 발행 공시 (rcept_dt 내림차순) — 테이블이 비어 있으면 빈 배열
+export function loadDartOfferings(days = 90) {
+  return fetchRecentSafe(
+    "dart_offerings?select=rcept_no,corp_name,corp_cls,report_nm,rcept_dt,url" +
+      `&rcept_dt=gte.${sinceISO(days).replace(/-/g, "")}&order=rcept_dt.desc`
+  );
+}
+
 // bond_regime_stats → kind별 Map(label -> rows[bucket_order 오름차순])
 export async function loadRegimeStats() {
   const rows = await fetchPaged(

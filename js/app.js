@@ -3,13 +3,21 @@ import {
   MONITOR_GROUPS, MATRIX_GROUPS, XCURVE_DEFS, RV_DEFS,
   REGIME_LABELS, MARKET_SYMBOLS, MARKET_TABLE, SLOT_VARS,
 } from "./config.js";
-import { loadSpreadSeries, loadMarket, loadRegimeStats, loadWebMeta } from "./api.js";
+import {
+  loadSpreadSeries, loadMarket, loadRegimeStats, loadWebMeta,
+  loadKrxFutures, loadKrxGovt, loadKrxCorp, loadDartOfferings,
+} from "./api.js";
 import { lineChart, regimeRangeChart, dualSpreadChart } from "./charts.js";
 
 const $ = (sel, root = document) => root.querySelector(sel);
 
 // 전역 상태 — 로드된 데이터
-const S = { series: new Map(), market: new Map(), stats: { regime: new Map(), rv: new Map(), xcurve: new Map() }, asof: "" };
+const S = {
+  series: new Map(), market: new Map(),
+  stats: { regime: new Map(), rv: new Map(), xcurve: new Map() },
+  futures: [], govt: [], corp: [], dart: [],
+  asof: "",
+};
 
 /* ══ 화면 구성 해석 계층 — 단일 소스: Supabase web_meta(specs.py), 없으면 config.js 폴백 ══ */
 // 모든 화면은 CFG 만 참조한다 — 지표 추가 시 웹 코드 수정 불필요
@@ -73,6 +81,10 @@ export function applyMeta(meta) {
   renderXcurve();
   renderRv();
   renderRegime();
+  renderWeekly();
+  renderTrades();
+  renderOfferings();
+  renderFlows();
 }
 
 /* ══ 테마 토글: 없음(시스템) → dark → light 순환, localStorage 유지 ══ */
@@ -794,15 +806,383 @@ function renderRegime() {
   draw();
 }
 
+/* ══════════════ 주간 채권시장 ══════════════ */
+const intFmt = (v) => (v == null || Number.isNaN(v) ? "—" : Math.round(v).toLocaleString("ko-KR"));
+// tbody 에 "데이터 없음" 안내 행
+function hintRow(tbody, colSpan, text) {
+  const tr = document.createElement("tr");
+  const td = document.createElement("td");
+  td.colSpan = colSpan;
+  td.textContent = text;
+  td.className = "";
+  td.style.textAlign = "left";
+  tr.appendChild(td);
+  tbody.appendChild(tr);
+}
+// 배열에서 고유 날짜(오름차순)
+function distinctDates(rows) {
+  return [...new Set(rows.map((r) => r.trade_date))].sort();
+}
+
+const FUT_NAMES = { KTB3: "3년 국채선물", KTB5: "5년 국채선물", KTB10: "10년 국채선물", KTB30: "30년 국채선물" };
+
+function renderWeekly() {
+  const root = $("#view-weekly");
+  root.innerHTML = `
+    <div class="section-title">채권시장종합</div>
+    <p class="section-sub">국고·통안 수익률(%) · 전주비(5영업일)·전월비(bp)</p>
+    <div class="table-scroll"><table class="data">
+      <thead><tr><th>지표</th><th>수익률(%)</th><th>전주비(bp)</th><th>전월비(bp)</th></tr></thead>
+      <tbody id="wk-bond"></tbody></table></div>
+    <div class="section-title">국채선물</div>
+    <p class="section-sub" id="wk-fut-sub">근월물(거래량 최대) 기준</p>
+    <div class="table-scroll"><table class="data">
+      <thead><tr><th>상품</th><th>종목</th><th>종가</th><th>전일비</th><th>주간변동</th><th>미결제약정</th><th>거래량</th></tr></thead>
+      <tbody id="wk-fut"></tbody></table></div>
+    <div class="section-title">장내 국채 지표물 · BEI</div>
+    <div class="table-scroll"><table class="data">
+      <thead><tr><th>구분</th><th>수익률(%)</th><th>주간변동(bp)</th></tr></thead>
+      <tbody id="wk-govt"></tbody></table></div>
+    <div class="section-title">시장지표 주간</div>
+    <div class="table-scroll"><table class="data">
+      <thead><tr><th>지표</th><th>종가</th><th>전일비</th><th>주간변동률(%)</th></tr></thead>
+      <tbody id="wk-mkt"></tbody></table></div>`;
+
+  // 1) 채권시장종합 — CFG 의 국고·통안(govt) 그룹 라벨 기반 (하드코딩 없음)
+  const bondBody = $("#wk-bond", root);
+  const govtLabels = CFG.monitorGroups.filter((g) => g.govt).flatMap((g) => g.labels || []);
+  for (const label of govtLabels) {
+    const pts = yPoints(seriesOf(label));
+    if (!pts.length) continue;
+    const last = pts[pts.length - 1];
+    const wk = pts.length > 5 ? pts[pts.length - 6] : null; // 5영업일 전
+    const mo = pointOnOrBefore(pts, addMonthsISO(last.d, -1));
+    const tr = document.createElement("tr");
+    const name = document.createElement("td");
+    name.textContent = label;
+    tr.appendChild(name);
+    tr.appendChild(numTd(last.v, { digits: 3 }));
+    tr.appendChild(numTd(wk ? (last.v - wk.v) * 100 : null, { signed: true }));
+    tr.appendChild(numTd(mo && mo.d !== last.d ? (last.v - mo.v) * 100 : null, { signed: true }));
+    bondBody.appendChild(tr);
+  }
+  if (!bondBody.children.length) hintRow(bondBody, 4, "데이터 적재 중");
+
+  // 2) 국채선물 — 최신 영업일, prod 별 근월물(거래량 최대). 주간변동은 같은 종목코드의 5영업일 전 종가 대비
+  const futBody = $("#wk-fut", root);
+  if (!S.futures.length) {
+    hintRow(futBody, 7, "데이터 적재 중");
+  } else {
+    const fDates = distinctDates(S.futures);
+    const latest = fDates[fDates.length - 1];
+    const wkDate = fDates.length > 5 ? fDates[fDates.length - 6] : null;
+    $("#wk-fut-sub", root).textContent = `기준일 ${latest} · 근월물(거래량 최대) 기준`;
+    const todays = S.futures.filter((r) => r.trade_date === latest);
+    const wkRows = wkDate ? S.futures.filter((r) => r.trade_date === wkDate) : [];
+    for (const prod of Object.keys(FUT_NAMES)) {
+      const cands = todays.filter((r) => r.prod === prod);
+      if (!cands.length) continue;
+      const front = cands.reduce((a, b) => ((b.volume ?? 0) > (a.volume ?? 0) ? b : a));
+      const wkSame = wkRows.find((r) => r.isu_cd === front.isu_cd) ?? null;
+      const tr = document.createElement("tr");
+      const p = document.createElement("td");
+      p.textContent = FUT_NAMES[prod];
+      tr.appendChild(p);
+      const nm = document.createElement("td");
+      nm.textContent = front.isu_nm ?? "—";
+      tr.appendChild(nm);
+      tr.appendChild(numTd(front.close_price, { digits: 2 }));
+      tr.appendChild(numTd(front.change, { digits: 2, signed: true }));
+      tr.appendChild(numTd(wkSame && front.close_price != null && wkSame.close_price != null
+        ? front.close_price - wkSame.close_price : null, { digits: 2, signed: true }));
+      const oi = document.createElement("td");
+      oi.textContent = intFmt(front.open_int);
+      tr.appendChild(oi);
+      const vol = document.createElement("td");
+      vol.textContent = intFmt(front.volume);
+      tr.appendChild(vol);
+      futBody.appendChild(tr);
+    }
+    if (!futBody.children.length) hintRow(futBody, 7, "데이터 적재 중");
+  }
+
+  // 3) 장내 국채 지표물 + BEI(국고10Y − 물가채10Y)
+  const gvBody = $("#wk-govt", root);
+  if (!S.govt.length) {
+    hintRow(gvBody, 3, "데이터 적재 중");
+  } else {
+    const gDates = distinctDates(S.govt);
+    const latest = gDates[gDates.length - 1];
+    const wkDate = gDates.length > 5 ? gDates[gDates.length - 6] : null;
+    const at = (date) => S.govt.filter((r) => r.trade_date === date);
+    const todays = at(latest);
+    const wkRows = wkDate ? at(wkDate) : [];
+    // tenor 는 문자열일 수 있음 — 숫자로 정규화해 비교
+    const bench = (rows, tenor, infl) =>
+      rows.find((r) => +r.tenor === tenor && r.bench_type === "지표" && !!r.is_inflation === infl) ?? null;
+    const tenors = [...new Set(todays.filter((r) => r.bench_type === "지표" && !r.is_inflation).map((r) => +r.tenor))]
+      .filter((t) => !Number.isNaN(t)).sort((a, b) => a - b);
+    for (const t of tenors) {
+      const cur = bench(todays, t, false);
+      const wk = bench(wkRows, t, false);
+      if (!cur || cur.close_yield == null) continue;
+      const tr = document.createElement("tr");
+      const nm = document.createElement("td");
+      nm.textContent = `국고 ${t}년`;
+      tr.appendChild(nm);
+      tr.appendChild(numTd(cur.close_yield, { digits: 3 }));
+      tr.appendChild(numTd(wk && wk.close_yield != null ? (cur.close_yield - wk.close_yield) * 100 : null, { signed: true }));
+      gvBody.appendChild(tr);
+    }
+    // BEI = 국고 10년 − 물가채 10년 (bp 아님 — %p ×100 = bp 표기)
+    const n10 = bench(todays, 10, false);
+    const i10 = todays.find((r) => +r.tenor === 10 && !!r.is_inflation) ?? null;
+    if (n10?.close_yield != null && i10?.close_yield != null) {
+      const wN = bench(wkRows, 10, false);
+      const wI = wkRows.find((r) => +r.tenor === 10 && !!r.is_inflation) ?? null;
+      const cur = (n10.close_yield - i10.close_yield) * 100;
+      const wk = wN?.close_yield != null && wI?.close_yield != null
+        ? cur - (wN.close_yield - wI.close_yield) * 100 : null;
+      const tr = document.createElement("tr");
+      const nm = document.createElement("td");
+      nm.textContent = "BEI (10년, bp)";
+      tr.appendChild(nm);
+      tr.appendChild(numTd(cur));
+      tr.appendChild(numTd(wk, { signed: true }));
+      gvBody.appendChild(tr);
+    }
+    if (!gvBody.children.length) hintRow(gvBody, 3, "데이터 적재 중");
+  }
+
+  // 4) 시장지표 주간 — 접이식과 동일 로직, 항상 펼침
+  buildMarketTable($("#wk-mkt", root));
+}
+
+/* ══════════════ 거래현황 (KRX 일반채권시장) ══════════════ */
+// 종목 분류: 여전채 / 회사채·기타 / null(국공채류 제외)
+function corpClass(nm) {
+  const s = nm || "";
+  if (/카드|캐피탈/.test(s)) return "여전채";
+  if (/국민주택|지역개발|서울도시|국고|통안|주택금융/.test(s)) return null;
+  return "회사채·기타";
+}
+
+function renderTrades() {
+  const root = $("#view-trades");
+  root.innerHTML = `
+    <p class="section-sub" id="tr-sub"></p>
+    <p class="hint">KRX 일반채권시장 장내 체결 기준 · 장외 체결·개별민평 대비는 미포함</p>
+    <div id="tr-top"></div>
+    <div class="section-title">수익률 변동 상위</div>
+    <p class="section-sub">전 영업일에도 체결된 종목의 체결수익률 변동(bp)</p>
+    <div class="tile-row" id="tr-move"></div>`;
+
+  if (!S.corp.length) {
+    const p = document.createElement("p");
+    p.className = "hint";
+    p.textContent = "데이터 적재 중";
+    $("#tr-top", root).appendChild(p);
+    return;
+  }
+
+  const dates = distinctDates(S.corp);
+  const latest = dates[dates.length - 1];
+  const prevDate = dates.length > 1 ? dates[dates.length - 2] : null;
+  $("#tr-sub", root).textContent = `기준일 ${latest}`;
+  const todays = S.corp.filter((r) => r.trade_date === latest);
+
+  // 표 1: 거래대금 상위 (여전채 / 회사채·기타 각 15)
+  const top = $("#tr-top", root);
+  for (const cls of ["여전채", "회사채·기타"]) {
+    const rows = todays.filter((r) => corpClass(r.isu_nm) === cls)
+      .sort((a, b) => (b.value ?? 0) - (a.value ?? 0)).slice(0, 15);
+    const title = document.createElement("div");
+    title.className = "section-title";
+    title.textContent = `${cls} 거래대금 상위`;
+    top.appendChild(title);
+    const scroll = document.createElement("div");
+    scroll.className = "table-scroll";
+    const table = document.createElement("table");
+    table.className = "data";
+    const thead = document.createElement("thead");
+    const hr = document.createElement("tr");
+    for (const h of ["종목명", "체결수익률(%)", "고가(%)", "저가(%)", "거래대금(억원)"]) {
+      const th = document.createElement("th");
+      th.textContent = h;
+      hr.appendChild(th);
+    }
+    thead.appendChild(hr);
+    const tbody = document.createElement("tbody");
+    for (const r of rows) {
+      const tr = document.createElement("tr");
+      const nm = document.createElement("td");
+      nm.textContent = r.isu_nm ?? "—";
+      tr.appendChild(nm);
+      tr.appendChild(numTd(r.close_yield, { digits: 3 }));
+      tr.appendChild(numTd(r.high_yield, { digits: 3 }));
+      tr.appendChild(numTd(r.low_yield, { digits: 3 }));
+      const val = document.createElement("td");
+      val.textContent = r.value == null ? "—"
+        : (r.value / 1e8).toLocaleString("ko-KR", { maximumFractionDigits: 1 });
+      tr.appendChild(val);
+      tbody.appendChild(tr);
+    }
+    if (!rows.length) hintRow(tbody, 5, "해당 분류 체결 없음");
+    table.append(thead, tbody);
+    scroll.appendChild(table);
+    top.appendChild(scroll);
+  }
+
+  // 표 2: 수익률 변동 상위 — 전일 체결 종목과 isu_cd 조인
+  const move = $("#tr-move", root);
+  if (!prevDate) {
+    const p = document.createElement("p");
+    p.className = "hint";
+    p.textContent = "전 영업일 데이터 적재 후 제공됩니다";
+    move.appendChild(p);
+    return;
+  }
+  const prevMap = new Map(S.corp.filter((r) => r.trade_date === prevDate && r.close_yield != null)
+    .map((r) => [r.isu_cd, r.close_yield]));
+  const joined = todays
+    .filter((r) => r.close_yield != null && prevMap.has(r.isu_cd) && corpClass(r.isu_nm) != null)
+    .map((r) => ({ nm: r.isu_nm, prev: prevMap.get(r.isu_cd), cur: r.close_yield,
+      chg: (r.close_yield - prevMap.get(r.isu_cd)) * 100 }));
+  const mkMoveTable = (titleText, rows) => {
+    const box = document.createElement("div");
+    const title = document.createElement("div");
+    title.className = "section-title";
+    title.textContent = titleText;
+    box.appendChild(title);
+    const scroll = document.createElement("div");
+    scroll.className = "table-scroll";
+    const table = document.createElement("table");
+    table.className = "data";
+    const thead = document.createElement("thead");
+    const hr = document.createElement("tr");
+    for (const h of ["종목명", "전일(%)", "당일(%)", "변동(bp)"]) {
+      const th = document.createElement("th");
+      th.textContent = h;
+      hr.appendChild(th);
+    }
+    thead.appendChild(hr);
+    const tbody = document.createElement("tbody");
+    for (const r of rows) {
+      const tr = document.createElement("tr");
+      const nm = document.createElement("td");
+      nm.textContent = r.nm;
+      tr.appendChild(nm);
+      tr.appendChild(numTd(r.prev, { digits: 3 }));
+      tr.appendChild(numTd(r.cur, { digits: 3 }));
+      tr.appendChild(numTd(r.chg, { signed: true }));
+      tbody.appendChild(tr);
+    }
+    if (!rows.length) hintRow(tbody, 4, "해당 종목 없음");
+    table.append(thead, tbody);
+    scroll.appendChild(table);
+    box.appendChild(scroll);
+    return box;
+  };
+  move.append(
+    mkMoveTable("강세 상위 10 (수익률 하락)", [...joined].sort((a, b) => a.chg - b.chg).slice(0, 10)),
+    mkMoveTable("약세 상위 10 (수익률 상승)", [...joined].sort((a, b) => b.chg - a.chg).slice(0, 10)),
+  );
+}
+
+/* ══════════════ 발행정보 (DART 채무증권 공시) ══════════════ */
+const CORP_CLS = { Y: "유가", K: "코스닥", N: "코넥스", E: "기타" };
+// rcept_dt "20260718" | "2026-07-18" → "2026-07-18"
+function fmtRceptDt(v) {
+  const s = String(v || "");
+  if (/^\d{8}$/.test(s)) return `${s.slice(0, 4)}-${s.slice(4, 6)}-${s.slice(6, 8)}`;
+  return s.slice(0, 10) || "—";
+}
+
+function renderOfferings() {
+  const root = $("#view-offerings");
+  root.innerHTML = `
+    <p class="section-sub">DART 채무증권 발행 공시 · 최근 90일</p>
+    <div id="of-body"></div>
+    <p class="hint">수요예측 밴드·주관사 상세는 2차(신고서 본문 파싱) 예정</p>`;
+  const box = $("#of-body", root);
+
+  if (!S.dart.length) {
+    const p = document.createElement("p");
+    p.className = "hint";
+    p.textContent = "DART API 키 등록 후 자동 수집됩니다 (bond-spread-system .env 의 DART_API_KEY)";
+    box.appendChild(p);
+    return;
+  }
+
+  const scroll = document.createElement("div");
+  scroll.className = "table-scroll";
+  const table = document.createElement("table");
+  table.className = "data";
+  const thead = document.createElement("thead");
+  const hr = document.createElement("tr");
+  for (const h of ["접수일", "회사명", "보고서명", "법인구분"]) {
+    const th = document.createElement("th");
+    th.textContent = h;
+    hr.appendChild(th);
+  }
+  thead.appendChild(hr);
+  const tbody = document.createElement("tbody");
+  for (const r of S.dart) {
+    const tr = document.createElement("tr");
+    const dt = document.createElement("td");
+    dt.textContent = fmtRceptDt(r.rcept_dt);
+    tr.appendChild(dt);
+    const nm = document.createElement("td");
+    nm.textContent = r.corp_name ?? "—";
+    tr.appendChild(nm);
+    const rep = document.createElement("td");
+    const url = String(r.url || "");
+    if (/^https?:\/\//.test(url)) {
+      const a = document.createElement("a");
+      a.href = url;
+      a.target = "_blank";
+      a.rel = "noopener";
+      a.textContent = r.report_nm ?? url;
+      rep.appendChild(a);
+    } else {
+      rep.textContent = r.report_nm ?? "—";
+    }
+    tr.appendChild(rep);
+    const cls = document.createElement("td");
+    cls.textContent = CORP_CLS[r.corp_cls] ?? (r.corp_cls || "—");
+    tr.appendChild(cls);
+    tbody.appendChild(tr);
+  }
+  table.append(thead, tbody);
+  scroll.appendChild(table);
+  box.appendChild(scroll);
+}
+
+/* ══════════════ 수급동향 (준비 중) ══════════════ */
+function renderFlows() {
+  const root = $("#view-flows");
+  root.innerHTML = `
+    <div class="card">
+      <div class="card-head"><h2>주요 투자자 수급동향</h2></div>
+      <p class="hint">KOFIA 채권정보센터 투자자별 매매동향 데이터 소스 연결 준비 중입니다.
+      연결되면 외국인·보험기금·은행·투신의 채권종류·만기별 순매수가 이 탭에 표시됩니다.</p>
+    </div>`;
+}
+
 /* ══════════════ 부트스트랩 ══════════════ */
 async function main() {
   try {
-    const [series, market, stats, meta] = await Promise.all([
+    const [series, market, stats, meta, futures, govt, corp, dart] = await Promise.all([
       loadSpreadSeries(), loadMarket(), loadRegimeStats(), loadWebMeta(),
+      loadKrxFutures(30), loadKrxGovt(30), loadKrxCorp(10), loadDartOfferings(90),
     ]);
     S.series = series;
     S.market = market;
     S.stats = stats;
+    S.futures = futures;
+    S.govt = govt;
+    S.corp = corp;
+    S.dart = dart;
 
     // 기준일 — 스프레드 데이터 최신 일자 (없으면 시장지표 최신 일자)
     let asof = "";
