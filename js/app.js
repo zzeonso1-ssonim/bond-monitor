@@ -544,8 +544,6 @@ function selectMatrixCell(td) {
 function renderXcurve() {
   const root = $("#view-xcurve");
   root.innerHTML = `
-    <div class="note"><strong>심리지표(이종커브)</strong> = 크레딧 단기물(2년) − 국고 3년.
-    금리 리스크가 완화되면 크레딧 매수가 몰려 스프레드가 축소되고, 리스크 확대 국면에서는 확대된다 — 채권 투자심리 지표.</div>
     <div class="tile-row" id="xc-tiles"></div>
     <div class="card">
       <div class="card-head"><h2>심리지표 추이</h2><span class="hint">bp</span></div>
