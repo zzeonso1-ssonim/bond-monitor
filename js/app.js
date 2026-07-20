@@ -877,11 +877,14 @@ function renderIssue() {
       hintRow(issBody, 5, "데이터 적재 준비 중 (sync_issue_stats 실행 후 표시됩니다)");
       hintRow(matBody, 4, "데이터 적재 준비 중");
     } else {
-      // 발행 — issued 가 있는 일자(영업일)만, 최근 5일=금주 / 그 전 5일=전주
+      // 발행 — 상환은 주말·공휴일에도 기록되므로 달력일 7일 창으로 합산
       // (이 테이블은 trade_date 가 아니라 stat_date — distinctDates 사용 불가)
       const issDates = [...new Set(S.issue.filter((r) => r.issued != null).map((r) => r.stat_date))].sort();
-      const wk1 = new Set(issDates.slice(-5));
-      const wk0 = new Set(issDates.slice(-10, -5));
+      const latestIss = issDates[issDates.length - 1];
+      const inRange = (d, from, to) => d >= from && d <= to;
+      const w1from = addDaysISO(latestIss, -6), w0to = addDaysISO(latestIss, -7), w0from = addDaysISO(latestIss, -13);
+      const wk1 = new Set(issDates.filter((d) => inRange(d, w1from, latestIss)));
+      const wk0 = new Set(issDates.filter((d) => inRange(d, w0from, w0to)));
       const sum = (dates, cls, field) => {
         let v = 0, has = false;
         for (const r of S.issue) {
@@ -889,9 +892,8 @@ function renderIssue() {
         }
         return has ? v : null;
       };
-      const d1 = issDates.slice(-5);
-      if (d1.length) $("#wk-iss-sub", root).textContent =
-        `KOFIA 발행시장 · 억원 · 금주 ${d1[0]} ~ ${d1[d1.length - 1]} 합산 · 전주 = 직전 5영업일`;
+      if (latestIss) $("#wk-iss-sub", root).textContent =
+        `KOFIA 발행시장 · 억원 · 금주 ${w1from} ~ ${latestIss} 합산(달력 7일) · 전주 = 직전 7일`;
       const issRow = (label, issued, redeemed, net, prevNet) => {
         const tr = document.createElement("tr");
         const nm = document.createElement("td");
@@ -1182,7 +1184,6 @@ function renderTrades() {
 }
 
 /* ══════════════ 발행정보 (DART 채무증권 공시) ══════════════ */
-const CORP_CLS = { Y: "유가", K: "코스닥", N: "코넥스", E: "기타" };
 // rcept_dt "20260718" | "2026-07-18" → "2026-07-18"
 function fmtRceptDt(v) {
   const s = String(v || "");
@@ -1196,10 +1197,7 @@ function renderOfferings() {
     <div class="section-title">수요예측·발행조건 (신고서 파싱)</div>
     <p class="section-sub">증권신고서(채무증권) 회차별 · 최근 1주일 · 발행액 억원 ·
       등급민평 = KOFIA 등급별 시가평가(4사 평균)를 기준만기로 보간한 값 — 개별민평(유료) 대체 참고치</p>
-    <div id="of-details"></div>
-    <div class="section-title">발행 공시 목록</div>
-    <p class="section-sub">DART 채무증권 발행 공시 · 최근 90일</p>
-    <div id="of-body"></div>`;
+    <div id="of-details"></div>`;
 
   // ── 파싱 상세 표 (dart_offering_details) ──
   const det = $("#of-details", root);
@@ -1303,59 +1301,7 @@ function renderOfferings() {
     scroll.appendChild(table);
     det.appendChild(scroll);
   }
-
-  const box = $("#of-body", root);
-
-  if (!S.dart.length) {
-    const p = document.createElement("p");
-    p.className = "hint";
-    p.textContent = "DART API 키 등록 후 자동 수집됩니다 (bond-spread-system .env 의 DART_API_KEY)";
-    box.appendChild(p);
-    return;
-  }
-
-  const scroll = document.createElement("div");
-  scroll.className = "table-scroll";
-  const table = document.createElement("table");
-  table.className = "data";
-  const thead = document.createElement("thead");
-  const hr = document.createElement("tr");
-  for (const h of ["접수일", "회사명", "보고서명", "법인구분"]) {
-    const th = document.createElement("th");
-    th.textContent = h;
-    hr.appendChild(th);
-  }
-  thead.appendChild(hr);
-  const tbody = document.createElement("tbody");
-  for (const r of S.dart) {
-    const tr = document.createElement("tr");
-    const dt = document.createElement("td");
-    dt.textContent = fmtRceptDt(r.rcept_dt);
-    tr.appendChild(dt);
-    const nm = document.createElement("td");
-    nm.textContent = r.corp_name ?? "—";
-    tr.appendChild(nm);
-    const rep = document.createElement("td");
-    const url = String(r.url || "");
-    if (/^https?:\/\//.test(url)) {
-      const a = document.createElement("a");
-      a.href = url;
-      a.target = "_blank";
-      a.rel = "noopener";
-      a.textContent = r.report_nm ?? url;
-      rep.appendChild(a);
-    } else {
-      rep.textContent = r.report_nm ?? "—";
-    }
-    tr.appendChild(rep);
-    const cls = document.createElement("td");
-    cls.textContent = CORP_CLS[r.corp_cls] ?? (r.corp_cls || "—");
-    tr.appendChild(cls);
-    tbody.appendChild(tr);
-  }
-  table.append(thead, tbody);
-  scroll.appendChild(table);
-  box.appendChild(scroll);
+  // 발행 공시 목록(DART raw list)은 사용자 요청으로 미표시 — S.dart 는 회사명 DART 링크용으로만 사용
 }
 
 /* ══════════════ 수급동향 (KOFIA 투자자별 거래현황) ══════════════ */
