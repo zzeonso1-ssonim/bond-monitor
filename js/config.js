@@ -41,10 +41,12 @@ export const MATRIX_GROUPS = [
   { sector: "회사채 BBB+", labelPrefix: "회사채 BBB+", mats: [1, 2, 3, 5, 10] },
 ];
 
-// 이종커브 — 크레딧 단기물 vs 국고 3년 (만기 이종 수익률차, bp). 채권 투자심리 지표.
+// 심리지표(이종커브) — 크레딧 단기물 vs 국고 3년 (만기 이종 수익률차, bp). 채권 투자심리 지표.
+// slot 은 SLOT_VARS 인덱스: 은행채=파랑(--series-1), 여전채=오렌지(--series-6), 특은채=녹색(--series-2)
 export const XCURVE_DEFS = [
-  { label: "은행채 AAA 2년 − 국고 3년", a: "은행채 AAA 2년", b: "국고채 3년", slot: 1 },
-  { label: "여전채 AA- 2년 − 국고 3년", a: "여전채 AA- 2년", b: "국고채 3년", slot: 3 },
+  { label: "은행채 AAA 2년 − 국고 3년", a: "은행채 AAA 2년", b: "국고채 3년", slot: 0 },
+  { label: "여전채 AA- 2년 − 국고 3년", a: "여전채 AA- 2년", b: "국고채 3년", slot: 5 },
+  { label: "특은채 AAA 2년 − 국고 3년", a: "특수은행채 AAA 2년", b: "국고채 3년", slot: 1 },
 ];
 
 // 상대가치 12종 — 동일 만기 수익률차(bp)
@@ -77,6 +79,41 @@ export const MARKET_SYMBOLS = [
   { symbol: "KOSPI", name: "KOSPI", digits: 2 },
   { symbol: "USDKRW", name: "원/달러", digits: 1 },
   { symbol: "UST10Y", name: "미국채 10Y", digits: 3, unit: "%" },
+];
+
+// 시장지표 접이식 표 — market_daily 전체 심볼(그룹별). rate=true 는 금리(%): 변화를 %p 절대치로 표시
+export const MARKET_TABLE = [
+  { group: "환율", items: [
+    { symbol: "USDKRW", name: "원/달러", digits: 1 },
+    { symbol: "USDJPY", name: "달러/엔", digits: 2 },
+    { symbol: "EURUSD", name: "유로/달러", digits: 4 },
+    { symbol: "AUDUSD", name: "호주달러", digits: 4 },
+    { symbol: "GBPUSD", name: "파운드", digits: 4 },
+    { symbol: "USDCNY", name: "달러/위안", digits: 4 },
+    { symbol: "DXY", name: "달러인덱스", digits: 2 },
+  ] },
+  { group: "주요지수", items: [
+    { symbol: "KOSPI", name: "KOSPI", digits: 2 },
+    { symbol: "SP500", name: "S&P500", digits: 2 },
+    { symbol: "NASDAQ", name: "나스닥", digits: 2 },
+    { symbol: "SSE", name: "상해종합", digits: 2 },
+    { symbol: "NIKKEI", name: "니케이225", digits: 2 },
+    { symbol: "HSCEI", name: "항셍H", digits: 2 },
+    { symbol: "SX5E", name: "유로스톡스50", digits: 2 },
+  ] },
+  { group: "해외금리(%)", items: [
+    { symbol: "UST2Y", name: "미국채 2Y", digits: 3, rate: true },
+    { symbol: "UST10Y", name: "미국채 10Y", digits: 3, rate: true },
+  ] },
+  { group: "상품", items: [
+    { symbol: "GSCI", name: "GSCI", digits: 2 },
+    { symbol: "WTI", name: "WTI", digits: 2 },
+    { symbol: "NATGAS", name: "천연가스", digits: 3 },
+    { symbol: "COPPER", name: "구리", digits: 3 },
+    { symbol: "GOLD", name: "금", digits: 1 },
+    { symbol: "WHEAT", name: "소맥", digits: 2 },
+    { symbol: "BTC", name: "비트코인", digits: 0 },
+  ] },
 ];
 
 // 카테고리 색상 슬롯(고정 순서 — 필터와 무관하게 지표당 고정)

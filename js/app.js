@@ -1,7 +1,7 @@
-// 본드스프레드 모니터 — 화면 로직 (순수 바닐라 ES 모듈, 외부 의존 없음)
+// 본드모니터 — 화면 로직 (순수 바닐라 ES 모듈, 외부 의존 없음)
 import {
   MONITOR_GROUPS, MATRIX_GROUPS, MATRIX_MATS, XCURVE_DEFS, RV_DEFS,
-  REGIME_LABELS, MARKET_SYMBOLS, SLOT_VARS,
+  REGIME_LABELS, MARKET_SYMBOLS, MARKET_TABLE, SLOT_VARS,
 } from "./config.js";
 import { loadSpreadSeries, loadMarket, loadRegimeStats } from "./api.js";
 import { lineChart, regimeRangeChart } from "./charts.js";
@@ -119,18 +119,30 @@ function deltaSpan(v, digits = 1) {
 }
 
 /* ══════════════ 일간 모니터링 ══════════════ */
-const mon = { label: null, govt: false, mode: "y" };
+const GOVT_SET = new Set(MONITOR_GROUPS.filter((g) => g.govt).flatMap((g) => g.labels));
+// a/b: "두 지표 차이" 모드의 선택 라벨 2개 (B − A = 나중 클릭 − 먼저 클릭)
+const mon = { label: null, govt: false, mode: "y", a: null, b: null };
 
 function renderMonitor() {
   const root = $("#view-monitor");
   root.innerHTML = `
     <div class="tile-row" id="mon-tiles"></div>
+    <details class="mkt-details">
+      <summary>시장지표</summary>
+      <div class="table-scroll">
+        <table class="data">
+          <thead><tr><th>지표</th><th>종가</th><th>전일비</th><th>주간변동률(%)</th></tr></thead>
+          <tbody id="mon-mkt-body"></tbody>
+        </table>
+      </div>
+    </details>
     <div class="card">
       <div class="card-head">
-        <h2 id="mon-title"></h2><span class="hint">최근 1년</span><span class="spacer"></span>
+        <h2 id="mon-title"></h2><span class="hint" id="mon-hint">최근 1년</span><span class="spacer"></span>
         <div class="seg" id="mon-seg">
           <button data-mode="y" class="active">수익률</button>
           <button data-mode="bp">스프레드</button>
+          <button data-mode="diff">두 지표 차이</button>
         </div>
       </div>
       <div id="mon-chart"></div>
@@ -173,6 +185,9 @@ function renderMonitor() {
     tiles.appendChild(tile);
   }
 
+  // 시장지표 접이식 표 — 전 심볼 종가·전일비·주간변동률
+  buildMarketTable($("#mon-mkt-body", root));
+
   // 30개 지표 요약 표
   const body = $("#mon-body", root);
   for (const g of MONITOR_GROUPS) {
@@ -211,20 +226,32 @@ function renderMonitor() {
     }
   }
 
-  // 행 클릭 → 카드 차트
+  // 행 클릭 → 카드 차트 (두 지표 차이 모드는 2개 선택)
   body.addEventListener("click", (e) => {
     const tr = e.target.closest("tr.sel-row");
     if (!tr) return;
-    selectMonitor(tr.dataset.label, tr.dataset.govt === "1");
+    if (mon.mode === "diff") pickDiffRow(tr.dataset.label);
+    else selectMonitor(tr.dataset.label, tr.dataset.govt === "1");
   });
 
-  // 세그먼트 토글 (수익률|스프레드)
+  // 세그먼트 토글 (수익률|스프레드|두 지표 차이)
   $("#mon-seg", root).addEventListener("click", (e) => {
     const btn = e.target.closest("button");
-    if (!btn || btn.disabled) return;
+    if (!btn || btn.disabled || btn.dataset.mode === mon.mode) return;
     mon.mode = btn.dataset.mode;
     for (const b of $("#mon-seg").querySelectorAll("button")) b.classList.toggle("active", b === btn);
-    updateMonitorChart();
+    if (mon.mode === "diff") {
+      // 진입 시 현재 선택 행을 A 로 승계, B 는 새로 클릭
+      mon.a = mon.label;
+      mon.b = null;
+      $('#mon-seg button[data-mode="bp"]').disabled = false;
+      updateMonitorHighlights();
+      updateMonitorChart();
+    } else {
+      // 단일 모드 복귀 — 마지막 클릭 행 하나
+      const last = mon.b ?? mon.a ?? mon.label;
+      selectMonitor(last, GOVT_SET.has(last));
+    }
   });
 
   // 기본 선택: 첫 지표
@@ -232,18 +259,113 @@ function renderMonitor() {
   selectMonitor(first.labels[0], !!first.govt);
 }
 
+// 시장지표 표 — 전일비는 절대변화(금리는 %p), 주간변동률은 (현재/1주전−1)×100 %, 금리만 주간도 %p 절대변화
+function buildMarketTable(body) {
+  for (const g of MARKET_TABLE) {
+    const gr = document.createElement("tr");
+    gr.className = "group-row";
+    const gtd = document.createElement("td");
+    gtd.colSpan = 4;
+    gtd.textContent = g.group;
+    gr.appendChild(gtd);
+    body.appendChild(gr);
+
+    for (const it of g.items) {
+      const rows = S.market.get(it.symbol) || []; // 날짜 내림차순
+      const cur = rows[0] ?? null;
+      const prev = rows[1] ?? null;
+      // 1주전 — 기준일 7일 전 이하 가장 가까운 날
+      let wk = null;
+      if (cur) {
+        const cutoff = addDaysISO(cur.trade_date, -7);
+        wk = rows.find((r) => r.trade_date <= cutoff) ?? null;
+      }
+      const tr = document.createElement("tr");
+      const name = document.createElement("td");
+      name.textContent = it.name;
+      tr.appendChild(name);
+      const vtd = document.createElement("td");
+      vtd.textContent = cur == null ? "—"
+        : cur.value.toLocaleString("ko-KR", { minimumFractionDigits: it.digits, maximumFractionDigits: it.digits });
+      tr.appendChild(vtd);
+      tr.appendChild(numTd(cur != null && prev != null ? cur.value - prev.value : null, { digits: it.digits, signed: true }));
+      // 주간: 금리는 %p 절대변화, 나머지는 변동률(%)
+      const wkVal = cur != null && wk != null
+        ? (it.rate ? cur.value - wk.value : (cur.value / wk.value - 1) * 100)
+        : null;
+      tr.appendChild(numTd(wkVal, { digits: it.rate ? it.digits : 2, signed: true }));
+      body.appendChild(tr);
+    }
+  }
+}
+
 function selectMonitor(label, govt) {
   mon.label = label;
   mon.govt = govt;
   if (govt && mon.mode === "bp") mon.mode = "y"; // 국고·통안은 수익률만
-  const bpBtn = $('#mon-seg button[data-mode="bp"]');
-  bpBtn.disabled = govt;
+  $('#mon-seg button[data-mode="bp"]').disabled = govt;
   for (const b of $("#mon-seg").querySelectorAll("button")) b.classList.toggle("active", b.dataset.mode === mon.mode);
-  for (const tr of document.querySelectorAll("#mon-body tr.sel-row")) tr.classList.toggle("selected", tr.dataset.label === label);
+  updateMonitorHighlights();
   updateMonitorChart();
 }
 
+// 두 지표 차이 모드 — 행 2개 선택, 세 번째 클릭부터는 최근 2개 유지(B → A 로 밀림)
+function pickDiffRow(label) {
+  if (mon.b == null) {
+    if (label === mon.a) return;
+    if (mon.a == null) mon.a = label;
+    else mon.b = label;
+  } else {
+    if (label === mon.b) return;
+    mon.a = mon.b;
+    mon.b = label;
+  }
+  updateMonitorHighlights();
+  updateMonitorChart();
+}
+
+// 표 행 하이라이트 — 단일 모드: 선택 1행 / 차이 모드: A·B 2행(뱃지 포함)
+function updateMonitorHighlights() {
+  for (const tr of document.querySelectorAll("#mon-body tr.sel-row")) {
+    tr.classList.remove("selected", "sel-b");
+    const old = tr.querySelector(".ab-badge");
+    if (old) old.remove();
+    const l = tr.dataset.label;
+    if (mon.mode === "diff") {
+      if (l !== mon.a && l !== mon.b) continue;
+      tr.classList.add("selected");
+      if (l === mon.b) tr.classList.add("sel-b");
+      const badge = document.createElement("span");
+      badge.className = "ab-badge" + (l === mon.b ? " b" : "");
+      badge.textContent = l === mon.a ? "A" : "B";
+      tr.cells[0].appendChild(badge);
+    } else if (l === mon.label) {
+      tr.classList.add("selected");
+    }
+  }
+}
+
 function updateMonitorChart() {
+  const hint = $("#mon-hint");
+  if (mon.mode === "diff") {
+    hint.textContent = "행 두 개를 차례로 클릭하세요 · 최근 1년";
+    const box = $("#mon-chart");
+    if (!mon.a || !mon.b) {
+      $("#mon-title").textContent = "두 지표 차이 (bp)";
+      box.textContent = "";
+      const p = document.createElement("p");
+      p.className = "hint";
+      p.textContent = "행 두 개를 차례로 클릭하세요";
+      box.appendChild(p);
+      return;
+    }
+    // 나중 클릭(B) − 먼저 클릭(A) 수익률차 ×100 (bp)
+    $("#mon-title").textContent = `${mon.b} − ${mon.a} (bp)`;
+    const pts = lastYear(diffPoints(mon.b, mon.a));
+    lineChart(box, [{ name: `${mon.b} − ${mon.a}`, cssVar: SLOT_VARS[0], points: pts }], { unit: "bp", digits: 1, zeroLine: true });
+    return;
+  }
+  hint.textContent = "최근 1년";
   const isY = mon.mode === "y";
   $("#mon-title").textContent = `${mon.label} ${isY ? "수익률(%)" : "스프레드(bp)"}`;
   const arr = seriesOf(mon.label);
@@ -349,15 +471,15 @@ function selectMatrixCell(td) {
   lineChart($("#mx-chart"), [{ name: td.dataset.title, cssVar: SLOT_VARS[0], points: pts }], { unit: "bp", digits: 1 });
 }
 
-/* ══════════════ 이종커브 ══════════════ */
+/* ══════════════ 심리지표(이종커브) ══════════════ */
 function renderXcurve() {
   const root = $("#view-xcurve");
   root.innerHTML = `
-    <div class="note"><strong>이종커브</strong> = 크레딧 단기물(2년) − 국고 3년.
+    <div class="note"><strong>심리지표(이종커브)</strong> = 크레딧 단기물(2년) − 국고 3년.
     금리 리스크가 완화되면 크레딧 매수가 몰려 스프레드가 축소되고, 리스크 확대 국면에서는 확대된다 — 채권 투자심리 지표.</div>
     <div class="tile-row" id="xc-tiles"></div>
     <div class="card">
-      <div class="card-head"><h2>이종커브 추이</h2><span class="hint">bp</span></div>
+      <div class="card-head"><h2>심리지표 추이</h2><span class="hint">bp</span></div>
       <div id="xc-chart"></div>
     </div>
     <div class="section-title">국면별 통계</div>
@@ -473,6 +595,7 @@ function renderRv() {
       const tr = document.createElement("tr");
       tr.className = "sel-row";
       tr.dataset.group = g.group;
+      tr.dataset.pair = pair.label;
       const name = document.createElement("td");
       name.textContent = pair.label;
       tr.appendChild(name);
@@ -487,16 +610,18 @@ function renderRv() {
   body.addEventListener("click", (e) => {
     const tr = e.target.closest("tr.sel-row");
     if (!tr) return;
-    selectRvGroup(tr.dataset.group);
+    selectRvGroup(tr.dataset.group, tr.dataset.pair);
   });
 
-  selectRvGroup(RV_DEFS[0].group);
+  selectRvGroup(RV_DEFS[0].group, RV_DEFS[0].pairs[0].label);
 }
 
-function selectRvGroup(groupName) {
+function selectRvGroup(groupName, pairLabel) {
   rvGroup = RV_DEFS.find((g) => g.group === groupName) || RV_DEFS[0];
-  for (const tr of document.querySelectorAll("#rv-body tr.sel-row")) tr.classList.toggle("selected", tr.dataset.group === rvGroup.group);
-  $("#rv-title").textContent = `${rvGroup.group} 추이`;
+  const pair = rvGroup.pairs.find((p) => p.label === pairLabel) || rvGroup.pairs[0];
+  const mat = pair.label.split(" ").pop(); // 라벨 끝의 만기 ("1년" 등)
+  for (const tr of document.querySelectorAll("#rv-body tr.sel-row")) tr.classList.toggle("selected", tr.dataset.pair === pair.label);
+  $("#rv-title").textContent = `${rvGroup.group} · 선택: ${mat}`;
 
   // 그룹 3개 만기 시리즈를 한 차트에 (동일 단위 bp)
   const series = rvGroup.pairs.map((pair, i) => ({

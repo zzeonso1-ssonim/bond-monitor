@@ -30,10 +30,12 @@ export async function loadSpreadSeries() {
   return map;
 }
 
-// market_daily 최근 시세 → [{symbol, d, value, prev}]
+// market_daily 최근 시세 → Map(symbol -> rows[날짜 내림차순])
 export async function loadMarket() {
+  // 최근 15일 범위 — 22개 심볼 전체의 전일·1주 계산에 충분 (페이지네이션은 fetchPaged 가 처리)
+  const from = new Date(Date.now() - 15 * 86400 * 1000).toISOString().slice(0, 10);
   const rows = await fetchPaged(
-    "market_daily?select=trade_date,symbol,value&order=trade_date.desc&limit=60"
+    `market_daily?select=trade_date,symbol,value&trade_date=gte.${from}&order=trade_date.desc`
   );
   const by = new Map();
   for (const r of rows) {

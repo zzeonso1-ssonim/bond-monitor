@@ -1,4 +1,4 @@
-/* 본드스프레드 모니터 — 차트/크롬 팔레트 (dataviz 기준: 라이트/다크 모두 검증된 슬롯) */
+/* 본드모니터 — 차트/크롬 팔레트 (dataviz 기준: 라이트/다크 모두 검증된 슬롯) */
 :root {
   color-scheme: light;
   --page: #f9f9f7;
@@ -198,6 +198,25 @@ table.data tbody tr.sel-row:hover { background: var(--accent-wash); }
 table.data tbody tr.sel-row.selected { background: var(--accent-wash); box-shadow: inset 2px 0 0 var(--series-1); }
 td.pos { color: var(--up); }
 td.neg { color: var(--dn); }
+
+/* ── 두 지표 차이 모드 A/B 표시 ── */
+table.data tbody tr.sel-row.selected.sel-b { box-shadow: inset 2px 0 0 var(--series-2); }
+.ab-badge {
+  display: inline-block; font-size: 10px; font-weight: 700; line-height: 1.5;
+  color: var(--series-1); border: 1px solid var(--series-1);
+  border-radius: 4px; padding: 0 4px; margin-left: 6px; vertical-align: 1px;
+}
+.ab-badge.b { color: var(--series-2); border-color: var(--series-2); }
+
+/* ── 시장지표 접이식 ── */
+details.mkt-details { margin: 8px 0 4px; }
+details.mkt-details > summary {
+  cursor: pointer; user-select: none;
+  font-size: 13px; font-weight: 600; color: var(--text-secondary);
+  padding: 6px 2px;
+}
+details.mkt-details > summary:hover { color: var(--text-primary); }
+details.mkt-details[open] > summary { color: var(--text-primary); }
 
 /* ── 섹터 매트릭스 ── */
 table.data td.mx-cell { cursor: pointer; }
