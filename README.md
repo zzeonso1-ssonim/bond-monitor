@@ -3,6 +3,14 @@
 한국 채권 크레딧스프레드 모니터링 정적 웹앱. 순수 바닐라 ES 모듈(HTML/CSS/JS)로만 구성되어
 빌드 도구·외부 라이브러리·CDN 없이 동작한다.
 
+
+## 접속 주소
+
+- Vercel (주): https://bond-monitor-kappa.vercel.app
+- GitHub Pages (보조): https://zzeonso1-ssonim.github.io/bond-monitor/
+
+`main` 브랜치에 push 하면 두 곳 모두 자동 재배포된다.
+
 ## 데이터
 
 - 소스: Supabase (PostgREST 읽기 전용, publishable key)
