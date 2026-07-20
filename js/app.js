@@ -1108,7 +1108,8 @@ function renderOfferings() {
   const root = $("#view-offerings");
   root.innerHTML = `
     <div class="section-title">수요예측·발행조건 (신고서 파싱)</div>
-    <p class="section-sub">증권신고서(채무증권) 회차별 · 최근 90일 · 발행액 억원</p>
+    <p class="section-sub">증권신고서(채무증권) 회차별 · 최근 1주일 · 발행액 억원 ·
+      등급민평 = KOFIA 등급별 시가평가(4사 평균)를 기준만기로 보간한 값 — 개별민평(유료) 대체 참고치</p>
     <div id="of-details"></div>
     <div class="section-title">발행 공시 목록</div>
     <p class="section-sub">DART 채무증권 발행 공시 · 최근 90일</p>
@@ -1122,6 +1123,39 @@ function renderOfferings() {
     p.textContent = "신고서 파싱 데이터 적재 준비 중 (sync_dart_details 실행 후 표시됩니다)";
     det.appendChild(p);
   } else {
+    // 등급민평 — 등급·기준만기에 해당하는 KOFIA 등급별 시가평가(4사 평균)를 만기 선형보간.
+    // 개별민평(민평사 유료 상품) 대신 쓰는 참고치. 기준만기는 밴드 문구 → 없으면 잔존만기.
+    const gradeMineval = (r) => {
+      const gm = /(?:회사채|무보증사채)\s+([A-D]{1,3}[0+\-]?)/.exec(r.rating || "");
+      if (!gm) return null;
+      const prefix = `${/카드|캐피탈/.test(r.corp_name || "") ? "여전채" : "회사채"} ${gm[1]}`;
+      let t = null;
+      const bm = /\(([\d.]+)\s*(년|개월)/.exec(r.band || "");
+      if (bm) t = bm[2] === "개월" ? parseFloat(bm[1]) / 12 : parseFloat(bm[1]);
+      else if (r.maturity_date && r.rcept_dt) {
+        t = (new Date(r.maturity_date) - new Date(r.rcept_dt)) / 31557600000;
+      }
+      if (!t || t <= 0) return null;
+      const pts = [];
+      for (const [label, arr] of S.series) {
+        if (!label.startsWith(prefix + " ")) continue;
+        const mt = /(\d+)년$/.exec(label);
+        const last = arr[arr.length - 1];
+        if (mt && last && last.y != null) pts.push({ t: +mt[1], y: last.y });
+      }
+      pts.sort((a, b) => a.t - b.t);
+      if (!pts.length) return null;
+      if (t <= pts[0].t) return pts[0].y;
+      if (t >= pts[pts.length - 1].t) return pts[pts.length - 1].y;
+      for (let i = 0; i < pts.length - 1; i++) {
+        if (t >= pts[i].t && t <= pts[i + 1].t) {
+          const w = (t - pts[i].t) / (pts[i + 1].t - pts[i].t);
+          return pts[i].y + w * (pts[i + 1].y - pts[i].y);
+        }
+      }
+      return null;
+    };
+
     const urlByRcept = new Map(S.dart.map((r) => [r.rcept_no, r.url]));
     const scroll = document.createElement("div");
     scroll.className = "table-scroll";
@@ -1129,9 +1163,10 @@ function renderOfferings() {
     table.className = "data";
     const thead = document.createElement("thead");
     const hr = document.createElement("tr");
-    for (const h of ["접수일", "회사명", "회차", "등급", "발행액(억)", "상환기일", "수요예측일", "청약일", "공모희망금리", "주관·인수"]) {
+    for (const h of ["접수일", "회사명", "회차", "등급", "발행액(억)", "상환기일", "수요예측일", "청약일", "공모희망금리", "등급민평(%)", "주관·인수"]) {
       const th = document.createElement("th");
       th.textContent = h;
+      if (h === "등급민평(%)") th.title = "KOFIA 등급별 시가평가(4사 평균) 기준만기 보간 — 개별민평(유료) 대체 참고치";
       hr.appendChild(th);
     }
     thead.appendChild(hr);
@@ -1168,6 +1203,7 @@ function renderOfferings() {
         td.textContent = v ?? "—";
         tr.appendChild(td);
       }
+      tr.appendChild(numTd(gradeMineval(r), { digits: 3 }));
       // 주관·인수 — 3사 초과는 "외 n" 축약 (전체는 title 툴팁)
       const uw = document.createElement("td");
       const names = (r.underwriters || "").split(",").map((s) => s.trim()).filter(Boolean);
@@ -1413,7 +1449,7 @@ async function main() {
     const [series, market, stats, meta, futures, corp, dart, dartDetails, flows] = await Promise.all([
       loadSpreadSeries(), loadMarket(), loadRegimeStats(), loadWebMeta(),
       loadKrxFutures(30), loadKrxCorp(35), loadDartOfferings(90),
-      loadDartDetails(90), loadInvestorFlows(200),
+      loadDartDetails(7), loadInvestorFlows(200),
     ]);
     S.series = series;
     S.market = market;
