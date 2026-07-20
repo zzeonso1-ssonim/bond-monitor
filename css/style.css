@@ -1,0 +1,227 @@
+/* 본드스프레드 모니터 — 차트/크롬 팔레트 (dataviz 기준: 라이트/다크 모두 검증된 슬롯) */
+:root {
+  color-scheme: light;
+  --page: #f9f9f7;
+  --surface-1: #fcfcfb;
+  --text-primary: #0b0b0b;
+  --text-secondary: #52514e;
+  --muted: #898781;
+  --grid: #e1e0d9;
+  --baseline: #c3c2b7;
+  --border: rgba(11, 11, 11, 0.10);
+  --series-1: #2a78d6;  /* blue */
+  --series-2: #008300;  /* green */
+  --series-3: #e87ba4;  /* magenta */
+  --series-4: #eda100;  /* yellow */
+  --series-5: #1baf7a;  /* aqua */
+  --series-6: #eb6834;  /* orange */
+  --up: #d03b3b;        /* 금리/스프레드 상승(확대) — 국내 관례: 빨강 */
+  --dn: #2a78d6;        /* 하락(축소) — 파랑 */
+  --accent-wash: rgba(42, 120, 214, 0.10);
+}
+:root[data-theme="dark"] {
+  color-scheme: dark;
+  --page: #0d0d0d;
+  --surface-1: #1a1a19;
+  --text-primary: #ffffff;
+  --text-secondary: #c3c2b7;
+  --muted: #898781;
+  --grid: #2c2c2a;
+  --baseline: #383835;
+  --border: rgba(255, 255, 255, 0.10);
+  --series-1: #3987e5;
+  --series-2: #008300;
+  --series-3: #d55181;
+  --series-4: #c98500;
+  --series-5: #199e70;
+  --series-6: #d95926;
+  --up: #e66767;
+  --dn: #3987e5;
+  --accent-wash: rgba(57, 135, 229, 0.14);
+}
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) {
+    color-scheme: dark;
+    --page: #0d0d0d;
+    --surface-1: #1a1a19;
+    --text-primary: #ffffff;
+    --text-secondary: #c3c2b7;
+    --muted: #898781;
+    --grid: #2c2c2a;
+    --baseline: #383835;
+    --border: rgba(255, 255, 255, 0.10);
+    --series-1: #3987e5;
+    --series-2: #008300;
+    --series-3: #d55181;
+    --series-4: #c98500;
+    --series-5: #199e70;
+    --series-6: #d95926;
+    --up: #e66767;
+    --dn: #3987e5;
+    --accent-wash: rgba(57, 135, 229, 0.14);
+  }
+}
+
+* { box-sizing: border-box; margin: 0; padding: 0; }
+html { -webkit-text-size-adjust: 100%; }
+body {
+  font-family: system-ui, -apple-system, "Segoe UI", "Apple SD Gothic Neo", "Malgun Gothic", sans-serif;
+  background: var(--page);
+  color: var(--text-primary);
+  font-size: 14px;
+  line-height: 1.5;
+}
+a { color: inherit; }
+
+/* ── 상단바 ── */
+.topbar {
+  display: flex;
+  align-items: center;
+  gap: 20px;
+  flex-wrap: wrap;
+  padding: 14px 24px 0;
+  border-bottom: 1px solid var(--border);
+  background: var(--surface-1);
+  position: sticky;
+  top: 0;
+  z-index: 30;
+}
+.brand { display: flex; align-items: baseline; gap: 10px; padding-bottom: 12px; }
+.brand-mark {
+  width: 10px; height: 10px; border-radius: 3px;
+  background: var(--series-1); align-self: center;
+}
+.brand h1 { font-size: 17px; font-weight: 700; letter-spacing: -0.2px; }
+.asof { color: var(--muted); font-size: 12.5px; }
+.tabs { display: flex; gap: 2px; margin-left: auto; }
+.tab {
+  appearance: none; border: 0; background: none;
+  font: inherit; font-size: 14px; color: var(--text-secondary);
+  padding: 10px 14px 12px; cursor: pointer;
+  border-bottom: 2px solid transparent;
+}
+.tab:hover { color: var(--text-primary); }
+.tab.active { color: var(--text-primary); font-weight: 600; border-bottom-color: var(--series-1); }
+.theme-toggle {
+  appearance: none; border: 1px solid var(--border); background: none;
+  color: var(--text-secondary); border-radius: 8px;
+  width: 30px; height: 30px; cursor: pointer; margin-bottom: 10px; font-size: 14px;
+}
+
+/* ── 본문 ── */
+main { max-width: 1180px; margin: 0 auto; padding: 20px 24px 48px; }
+.view { display: none; }
+.view.active { display: block; }
+.loading { color: var(--muted); padding: 40px 0; text-align: center; }
+.error-note { color: var(--up); padding: 8px 0; }
+
+.section-title { font-size: 15px; font-weight: 700; margin: 26px 0 4px; }
+.section-sub { color: var(--text-secondary); font-size: 13px; margin-bottom: 12px; }
+
+/* ── 스탯 타일 ── */
+.tile-row { display: grid; grid-template-columns: repeat(auto-fit, minmax(190px, 1fr)); gap: 12px; margin-bottom: 8px; }
+.tile {
+  background: var(--surface-1); border: 1px solid var(--border);
+  border-radius: 12px; padding: 14px 16px 12px;
+}
+.tile .t-label { color: var(--text-secondary); font-size: 12.5px; }
+.tile .t-value { font-size: 26px; font-weight: 650; margin-top: 2px; }
+.tile .t-value .unit { font-size: 14px; font-weight: 500; color: var(--muted); margin-left: 2px; }
+.tile .t-delta { font-size: 12.5px; margin-top: 2px; color: var(--text-secondary); }
+.delta-up { color: var(--up); }
+.delta-dn { color: var(--dn); }
+
+/* ── 카드 & 차트 ── */
+.card {
+  background: var(--surface-1); border: 1px solid var(--border);
+  border-radius: 12px; padding: 16px 18px; margin: 14px 0;
+}
+.card-head { display: flex; align-items: baseline; gap: 12px; flex-wrap: wrap; margin-bottom: 8px; }
+.card-head h2 { font-size: 15px; font-weight: 700; }
+.card-head .hint { color: var(--muted); font-size: 12.5px; }
+.card-head .spacer { flex: 1; }
+.chart-wrap { position: relative; }
+.chart-wrap svg { display: block; width: 100%; height: auto; }
+.viz-tooltip {
+  position: absolute; pointer-events: none; z-index: 20;
+  background: var(--surface-1); border: 1px solid var(--border);
+  border-radius: 8px; padding: 8px 10px; font-size: 12.5px;
+  box-shadow: 0 4px 14px rgba(0, 0, 0, 0.12);
+  min-width: 140px; display: none;
+}
+.viz-tooltip .tt-date { color: var(--muted); margin-bottom: 4px; }
+.viz-tooltip .tt-row { display: flex; align-items: center; gap: 7px; }
+.viz-tooltip .tt-key { width: 14px; height: 0; border-top: 2.5px solid; border-radius: 2px; }
+.viz-tooltip .tt-val { font-weight: 650; margin-left: auto; font-variant-numeric: tabular-nums; }
+.viz-tooltip .tt-name { color: var(--text-secondary); }
+
+.legend { display: flex; gap: 16px; flex-wrap: wrap; font-size: 12.5px; color: var(--text-secondary); margin: 4px 2px 0; }
+.legend .lg { display: inline-flex; align-items: center; gap: 6px; }
+.legend .lg-key { width: 16px; height: 0; border-top: 2.5px solid; border-radius: 2px; }
+
+/* ── 컨트롤 ── */
+.controls { display: flex; gap: 10px; flex-wrap: wrap; align-items: center; margin: 14px 0 4px; }
+.seg { display: inline-flex; border: 1px solid var(--border); border-radius: 9px; overflow: hidden; }
+.seg button {
+  appearance: none; border: 0; background: none; font: inherit; font-size: 12.5px;
+  color: var(--text-secondary); padding: 5px 12px; cursor: pointer;
+}
+.seg button + button { border-left: 1px solid var(--border); }
+.seg button.active { background: var(--accent-wash); color: var(--text-primary); font-weight: 600; }
+select.ctl {
+  font: inherit; font-size: 13px; color: var(--text-primary);
+  background: var(--surface-1); border: 1px solid var(--border);
+  border-radius: 9px; padding: 5px 10px;
+}
+
+/* ── 표 ── */
+.table-scroll { overflow-x: auto; }
+table.data {
+  width: 100%; border-collapse: collapse; font-size: 13px;
+  font-variant-numeric: tabular-nums;
+}
+table.data th, table.data td {
+  padding: 6px 10px; text-align: right; white-space: nowrap;
+  border-bottom: 1px solid var(--grid);
+}
+table.data th {
+  color: var(--muted); font-weight: 600; font-size: 12px;
+  border-bottom: 1px solid var(--baseline);
+}
+table.data th:first-child, table.data td:first-child { text-align: left; }
+table.data tr.group-row td {
+  color: var(--text-secondary); font-weight: 700; font-size: 12px;
+  padding-top: 12px; border-bottom-color: var(--baseline); text-align: left;
+}
+table.data tbody tr.sel-row { cursor: pointer; }
+table.data tbody tr.sel-row:hover { background: var(--accent-wash); }
+table.data tbody tr.sel-row.selected { background: var(--accent-wash); box-shadow: inset 2px 0 0 var(--series-1); }
+td.pos { color: var(--up); }
+td.neg { color: var(--dn); }
+
+/* ── 섹터 매트릭스 ── */
+table.data td.mx-cell { cursor: pointer; }
+table.data td.mx-cell:hover { outline: 1px solid var(--series-1); outline-offset: -1px; }
+table.data td.mx-cell.selected { outline: 2px solid var(--series-1); outline-offset: -2px; }
+.mx-sub { font-size: 11px; margin-left: 4px; }
+
+.seg button:disabled { opacity: 0.4; cursor: default; }
+
+.note {
+  border-left: 3px solid var(--series-1); background: var(--accent-wash);
+  border-radius: 0 10px 10px 0; padding: 10px 14px; font-size: 13px;
+  color: var(--text-secondary); margin: 14px 0;
+}
+.note strong { color: var(--text-primary); }
+
+.foot {
+  max-width: 1180px; margin: 0 auto; padding: 0 24px 40px;
+  color: var(--muted); font-size: 12px;
+}
+
+@media (max-width: 720px) {
+  .topbar { padding: 10px 14px 0; gap: 8px; }
+  .tabs { margin-left: 0; width: 100%; overflow-x: auto; }
+  main { padding: 14px 14px 40px; }
+  .tile .t-value { font-size: 22px; }
+}
