@@ -83,7 +83,7 @@ export function applyMeta(meta) {
   renderXcurve();
   renderRv();
   renderRegime();
-  renderWeekly();
+  renderIssue();
   renderTrades();
   renderOfferings();
   renderFlows();
@@ -848,152 +848,20 @@ function distinctDates(rows) {
 
 const FUT_NAMES = { KTB3: "3년 국채선물", KTB5: "5년 국채선물", KTB10: "10년 국채선물", KTB30: "30년 국채선물" };
 
-function renderWeekly() {
-  const root = $("#view-weekly");
+function renderIssue() {
+  const root = $("#view-issue");
   root.innerHTML = `
-    <div class="section-title">채권시장종합</div>
-    <p class="section-sub">국고·통안 수익률(%) · 전주비(5영업일)·전월비(bp)</p>
-    <div class="table-scroll"><table class="data">
-      <thead><tr><th>지표</th><th>수익률(%)</th><th>전주비(bp)</th><th>전월비(bp)</th></tr></thead>
-      <tbody id="wk-bond"></tbody></table></div>
-    <div class="section-title">국채선물</div>
-    <p class="section-sub" id="wk-fut-sub">근월물(거래량 최대) 기준</p>
-    <div class="table-scroll"><table class="data">
-      <thead><tr><th>상품</th><th>종목</th><th>종가</th><th>전일비</th><th>주간변동</th><th>미결제약정</th><th>거래량</th></tr></thead>
-      <tbody id="wk-fut"></tbody></table></div>
-    <div class="section-title">외국인 국채선물 순매수</div>
-    <p class="section-sub" id="wk-frg-sub">KRX 파생 투자자별 거래실적 · 계약 수 기준</p>
-    <div class="tile-row" id="wk-frg-tiles"></div>
-    <div class="card">
-      <div class="card-head"><h2>연초 이후 누적 순매수</h2><span class="hint">계약</span></div>
-      <div id="wk-frg-chart"></div>
-    </div>
+    <p class="hint">KOFIA 발행시장 통계 · 단위 억원 · 매일 20:00 갱신</p>
     <div class="section-title">발행통계 (금주)</div>
-    <p class="section-sub" id="wk-iss-sub">KOFIA 발행시장 · 억원 · 최근 5영업일 합산, 전주 = 그 직전 5영업일</p>
+    <p class="section-sub" id="wk-iss-sub">억원 · 최근 5영업일 합산, 전주 = 그 직전 5영업일</p>
     <div class="table-scroll"><table class="data">
       <thead><tr><th>채권종류</th><th>발행액</th><th>상환액</th><th>순발행</th><th>전주 순발행</th></tr></thead>
       <tbody id="wk-iss"></tbody></table></div>
     <div class="section-title">만기통계 (만기도래·예정)</div>
-    <p class="section-sub" id="wk-mat-sub">KOFIA 발행시장 · 억원 · 금주 실적 + 향후 2주 예정</p>
+    <p class="section-sub" id="wk-mat-sub">억원 · 금주 실적 + 향후 2주 예정</p>
     <div class="table-scroll"><table class="data">
       <thead><tr><th>채권종류</th><th>금주</th><th>다음주</th><th>다다음주</th></tr></thead>
-      <tbody id="wk-mat"></tbody></table></div>
-    <div class="section-title">시장지표 주간</div>
-    <div class="table-scroll"><table class="data">
-      <thead><tr><th>지표</th><th>종가</th><th>전일비</th><th>주간변동률(%)</th></tr></thead>
-      <tbody id="wk-mkt"></tbody></table></div>`;
-
-  // 1) 채권시장종합 — CFG 의 국고·통안(govt) 그룹 라벨 기반 (하드코딩 없음)
-  const bondBody = $("#wk-bond", root);
-  const govtLabels = CFG.monitorGroups.filter((g) => g.govt).flatMap((g) => g.labels || []);
-  for (const label of govtLabels) {
-    const pts = yPoints(seriesOf(label));
-    if (!pts.length) continue;
-    const last = pts[pts.length - 1];
-    const wk = pts.length > 5 ? pts[pts.length - 6] : null; // 5영업일 전
-    const mo = pointOnOrBefore(pts, addMonthsISO(last.d, -1));
-    const tr = document.createElement("tr");
-    const name = document.createElement("td");
-    name.textContent = label;
-    tr.appendChild(name);
-    tr.appendChild(numTd(last.v, { digits: 3 }));
-    tr.appendChild(numTd(wk ? (last.v - wk.v) * 100 : null, { signed: true }));
-    tr.appendChild(numTd(mo && mo.d !== last.d ? (last.v - mo.v) * 100 : null, { signed: true }));
-    bondBody.appendChild(tr);
-  }
-  if (!bondBody.children.length) hintRow(bondBody, 4, "데이터 적재 중");
-
-  // 2) 국채선물 — 최신 영업일, prod 별 근월물(거래량 최대). 주간변동은 같은 종목코드의 5영업일 전 종가 대비
-  const futBody = $("#wk-fut", root);
-  if (!S.futures.length) {
-    hintRow(futBody, 7, "데이터 적재 중");
-  } else {
-    const fDates = distinctDates(S.futures);
-    const latest = fDates[fDates.length - 1];
-    const wkDate = fDates.length > 5 ? fDates[fDates.length - 6] : null;
-    $("#wk-fut-sub", root).textContent = `기준일 ${latest} · 근월물(거래량 최대) 기준`;
-    const todays = S.futures.filter((r) => r.trade_date === latest);
-    const wkRows = wkDate ? S.futures.filter((r) => r.trade_date === wkDate) : [];
-    for (const prod of Object.keys(FUT_NAMES)) {
-      const cands = todays.filter((r) => r.prod === prod);
-      if (!cands.length) continue;
-      const front = cands.reduce((a, b) => ((b.volume ?? 0) > (a.volume ?? 0) ? b : a));
-      const wkSame = wkRows.find((r) => r.isu_cd === front.isu_cd) ?? null;
-      const tr = document.createElement("tr");
-      const p = document.createElement("td");
-      p.textContent = FUT_NAMES[prod];
-      tr.appendChild(p);
-      const nm = document.createElement("td");
-      nm.textContent = front.isu_nm ?? "—";
-      tr.appendChild(nm);
-      tr.appendChild(numTd(front.close_price, { digits: 2 }));
-      tr.appendChild(numTd(front.change, { digits: 2, signed: true }));
-      tr.appendChild(numTd(wkSame && front.close_price != null && wkSame.close_price != null
-        ? front.close_price - wkSame.close_price : null, { digits: 2, signed: true }));
-      const oi = document.createElement("td");
-      oi.textContent = intFmt(front.open_int);
-      tr.appendChild(oi);
-      const vol = document.createElement("td");
-      vol.textContent = intFmt(front.volume);
-      tr.appendChild(vol);
-      futBody.appendChild(tr);
-    }
-    if (!futBody.children.length) hintRow(futBody, 7, "데이터 적재 중");
-  }
-
-  // 3) 외국인 국채선물 순매수 — 일별(계약) 타일 + 연초 누적 라인차트
-  {
-    const bySym = new Map();
-    for (const r of S.futFrg) {
-      if (!bySym.has(r.symbol)) bySym.set(r.symbol, []);
-      bySym.get(r.symbol).push(r); // trade_date 오름차순 로드
-    }
-    const tiles = $("#wk-frg-tiles", root);
-    const chartSeries = [];
-    const defs = [
-      { sym: "KTB3F_FRG", name: "3년 국채선물", cssVar: "--series-1" },
-      { sym: "KTB10F_FRG", name: "10년 국채선물", cssVar: "--series-6" },
-    ];
-    let hasAny = false;
-    for (const def of defs) {
-      const rows = bySym.get(def.sym) || [];
-      if (!rows.length) continue;
-      hasAny = true;
-      const last = rows[rows.length - 1];
-      let cum = 0;
-      const points = rows.map((r) => ({ d: r.trade_date, v: (cum += r.value) }));
-      chartSeries.push({ name: def.name, cssVar: def.cssVar, points });
-      // 주간 = 최근 5영업일 순매수 합 (연초 누적은 차트로만)
-      const wk = rows.slice(-5).reduce((s, r) => s + r.value, 0);
-      const tile = document.createElement("div");
-      tile.className = "tile";
-      const lab = document.createElement("div");
-      lab.className = "t-label";
-      lab.textContent = `${def.name} (${last.trade_date.slice(5).replace("-", "/")})`;
-      const val = document.createElement("div");
-      val.className = "t-value";
-      val.textContent = intSigned(last.value);
-      const u = document.createElement("span");
-      u.className = "unit";
-      u.textContent = "계약";
-      val.appendChild(u);
-      const del = document.createElement("div");
-      del.className = "t-delta";
-      del.append("주간(5영업일) ", intDeltaSpan(wk));
-      tile.append(lab, val, del);
-      tiles.appendChild(tile);
-    }
-    if (hasAny) {
-      const latest = S.futFrg[S.futFrg.length - 1]?.trade_date;
-      $("#wk-frg-sub", root).textContent = `KRX 파생 투자자별 거래실적 · 계약 수 기준 · 기준일 ${latest}`;
-      lineChart($("#wk-frg-chart", root), chartSeries, { unit: "계약", digits: 0, zeroLine: true });
-    } else {
-      const p = document.createElement("p");
-      p.className = "hint";
-      p.textContent = "데이터 적재 준비 중";
-      tiles.appendChild(p);
-    }
-  }
+      <tbody id="wk-mat"></tbody></table></div>`;
 
   // 4) 발행통계(금주 vs 전주) + 만기통계(금주·향후 2주) — kofia_issue_stats
   {
@@ -1069,8 +937,6 @@ function renderWeekly() {
     }
   }
 
-  // 5) 시장지표 주간 — 접이식과 동일 로직, 항상 펼침
-  buildMarketTable($("#wk-mkt", root));
 }
 
 /* ══════════════ 거래현황 (KRX 일반채권시장) ══════════════ */
@@ -1440,9 +1306,106 @@ function intDeltaSpan(v) {
   return sp;
 }
 
+
+/* 수급동향 탭의 '선물 수급' 블록 — 국채선물 근월물 표 + 외국인 순매수(주간 타일·연초 누적 차트) */
+function renderFlowsFutures(root) {
+  // 선물 수급 1) 국채선물 시세 — 최신 영업일, prod 별 근월물(거래량 최대). 주간변동은 같은 종목코드의 5영업일 전 종가 대비
+  const futBody = $("#fl-fut", root);
+  if (!S.futures.length) {
+    hintRow(futBody, 7, "데이터 적재 중");
+  } else {
+    const fDates = distinctDates(S.futures);
+    const latest = fDates[fDates.length - 1];
+    const wkDate = fDates.length > 5 ? fDates[fDates.length - 6] : null;
+    $("#fl-fut-sub", root).textContent = `기준일 ${latest} · 근월물(거래량 최대) 기준`;
+    const todays = S.futures.filter((r) => r.trade_date === latest);
+    const wkRows = wkDate ? S.futures.filter((r) => r.trade_date === wkDate) : [];
+    for (const prod of Object.keys(FUT_NAMES)) {
+      const cands = todays.filter((r) => r.prod === prod);
+      if (!cands.length) continue;
+      const front = cands.reduce((a, b) => ((b.volume ?? 0) > (a.volume ?? 0) ? b : a));
+      const wkSame = wkRows.find((r) => r.isu_cd === front.isu_cd) ?? null;
+      const tr = document.createElement("tr");
+      const p = document.createElement("td");
+      p.textContent = FUT_NAMES[prod];
+      tr.appendChild(p);
+      const nm = document.createElement("td");
+      nm.textContent = front.isu_nm ?? "—";
+      tr.appendChild(nm);
+      tr.appendChild(numTd(front.close_price, { digits: 2 }));
+      tr.appendChild(numTd(front.change, { digits: 2, signed: true }));
+      tr.appendChild(numTd(wkSame && front.close_price != null && wkSame.close_price != null
+        ? front.close_price - wkSame.close_price : null, { digits: 2, signed: true }));
+      const oi = document.createElement("td");
+      oi.textContent = intFmt(front.open_int);
+      tr.appendChild(oi);
+      const vol = document.createElement("td");
+      vol.textContent = intFmt(front.volume);
+      tr.appendChild(vol);
+      futBody.appendChild(tr);
+    }
+    if (!futBody.children.length) hintRow(futBody, 7, "데이터 적재 중");
+  }
+
+  // 선물 수급 2) 외국인 순매수 — 일별(계약) 타일 + 연초 누적 라인차트
+  {
+    const bySym = new Map();
+    for (const r of S.futFrg) {
+      if (!bySym.has(r.symbol)) bySym.set(r.symbol, []);
+      bySym.get(r.symbol).push(r); // trade_date 오름차순 로드
+    }
+    const tiles = $("#fl-frg-tiles", root);
+    const chartSeries = [];
+    const defs = [
+      { sym: "KTB3F_FRG", name: "3년 국채선물", cssVar: "--series-1" },
+      { sym: "KTB10F_FRG", name: "10년 국채선물", cssVar: "--series-6" },
+    ];
+    let hasAny = false;
+    for (const def of defs) {
+      const rows = bySym.get(def.sym) || [];
+      if (!rows.length) continue;
+      hasAny = true;
+      const last = rows[rows.length - 1];
+      let cum = 0;
+      const points = rows.map((r) => ({ d: r.trade_date, v: (cum += r.value) }));
+      chartSeries.push({ name: def.name, cssVar: def.cssVar, points });
+      // 주간 = 최근 5영업일 순매수 합 (연초 누적은 차트로만)
+      const wk = rows.slice(-5).reduce((s, r) => s + r.value, 0);
+      const tile = document.createElement("div");
+      tile.className = "tile";
+      const lab = document.createElement("div");
+      lab.className = "t-label";
+      lab.textContent = `${def.name} (${last.trade_date.slice(5).replace("-", "/")})`;
+      const val = document.createElement("div");
+      val.className = "t-value";
+      val.textContent = intSigned(last.value);
+      const u = document.createElement("span");
+      u.className = "unit";
+      u.textContent = "계약";
+      val.appendChild(u);
+      const del = document.createElement("div");
+      del.className = "t-delta";
+      del.append("주간(5영업일) ", intDeltaSpan(wk));
+      tile.append(lab, val, del);
+      tiles.appendChild(tile);
+    }
+    if (hasAny) {
+      const latest = S.futFrg[S.futFrg.length - 1]?.trade_date;
+      $("#fl-frg-sub", root).textContent = `KRX 파생 투자자별 거래실적 · 계약 수 기준 · 기준일 ${latest}`;
+      lineChart($("#fl-frg-chart", root), chartSeries, { unit: "계약", digits: 0, zeroLine: true });
+    } else {
+      const p = document.createElement("p");
+      p.className = "hint";
+      p.textContent = "데이터 적재 준비 중";
+      tiles.appendChild(p);
+    }
+  }
+}
+
 function renderFlows() {
   const root = $("#view-flows");
   root.innerHTML = `
+    <div class="section-title">현물 수급 (장외 투자자별 거래)</div>
     <p class="section-sub" id="fl-sub"></p>
     <p class="hint">KOFIA 채권정보센터 투자자별 거래현황(장외) · 거래대금 순매수 기준 · 단위 억원</p>
     <div class="tile-row" id="fl-tiles"></div>
@@ -1458,6 +1421,18 @@ function renderFlows() {
         <div class="controls"><select class="ctl" id="fl-class"></select></div>
       </div>
       <div id="fl-chart"></div>
+    </div>
+    <div class="section-title">선물 수급 (KRX 국채선물)</div>
+    <p class="section-sub" id="fl-fut-sub">근월물(거래량 최대) 기준</p>
+    <div class="table-scroll"><table class="data">
+      <thead><tr><th>상품</th><th>종목</th><th>종가</th><th>전일비</th><th>주간변동</th><th>미결제약정</th><th>거래량</th></tr></thead>
+      <tbody id="fl-fut"></tbody></table></div>
+    <div class="section-title">외국인 국채선물 순매수</div>
+    <p class="section-sub" id="fl-frg-sub">KRX 파생 투자자별 거래실적 · 계약 수 기준</p>
+    <div class="tile-row" id="fl-frg-tiles"></div>
+    <div class="card">
+      <div class="card-head"><h2>연초 이후 누적 순매수</h2><span class="hint">계약</span></div>
+      <div id="fl-frg-chart"></div>
     </div>`;
 
   const net = S.flows.filter((r) => r.trade_type === "순매수");
@@ -1466,6 +1441,7 @@ function renderFlows() {
     p.className = "hint";
     p.textContent = "데이터 적재 준비 중 (bond-spread-system sync_investor_flows 실행 후 표시됩니다)";
     $("#fl-matrix", root).appendChild(p);
+    renderFlowsFutures(root);
     return;
   }
 
@@ -1586,6 +1562,8 @@ function renderFlows() {
   });
   sel.addEventListener("change", drawChart);
   drawChart();
+
+  renderFlowsFutures(root);
 }
 
 /* ══════════════ 부트스트랩 ══════════════ */
