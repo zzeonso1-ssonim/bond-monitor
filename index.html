@@ -20,15 +20,18 @@
     <button class="tab" data-view="rv">상대가치</button>
     <button class="tab" data-view="regime">국면별 분석</button>
     <button class="tab" data-view="weekly">주간 채권시장</button>
-    <button class="tab" data-view="rates">선물·금리</button>
     <button class="tab" data-view="trades">거래현황</button>
     <button class="tab" data-view="offerings">발행정보</button>
     <button class="tab" data-view="flows">수급동향</button>
   </nav>
-  <button class="theme-toggle" id="themeToggle" title="라이트/다크 전환">◐</button>
+  <div class="top-actions">
+    <button class="pdf-btn" id="pdfBtn" title="현재 탭을 PDF로 저장(인쇄)">PDF 저장</button>
+    <button class="theme-toggle" id="themeToggle" title="라이트/다크 전환">◐</button>
+  </div>
 </header>
 
 <main id="main">
+  <div class="print-header" id="printHeader" aria-hidden="true"></div>
   <div class="loading" id="loading">데이터 불러오는 중…</div>
   <section id="view-monitor" class="view active"></section>
   <section id="view-matrix" class="view"></section>
@@ -36,7 +39,6 @@
   <section id="view-rv" class="view"></section>
   <section id="view-regime" class="view"></section>
   <section id="view-weekly" class="view"></section>
-  <section id="view-rates" class="view"></section>
   <section id="view-trades" class="view"></section>
   <section id="view-offerings" class="view"></section>
   <section id="view-flows" class="view"></section>

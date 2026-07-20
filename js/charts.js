@@ -534,3 +534,95 @@ export function dualSpreadChart(container, data, opts = {}) {
   );
   container.appendChild(lg);
 }
+
+// 그룹 막대 차트 — 수급동향 주간/월간 순매수용. 음수 지원(0선 기준 위/아래).
+// categories: ["07/18", ...], series: [{name, cssVar, values:[num|null, ...]}]
+// 네이티브 <title> 툴팁 사용(값은 콤마 정수). opts.unit 은 y축 단위 표기.
+export function barChart(container, categories, series, opts = {}) {
+  const W = 960, H = 300;
+  const M = { l: 56, r: 14, t: 12, b: 26 };
+  const unit = opts.unit || "";
+
+  container.textContent = "";
+  const wrap = document.createElement("div");
+  wrap.className = "chart-wrap";
+  const svg = el("svg", { viewBox: `0 0 ${W} ${H}`, role: "img" });
+  wrap.appendChild(svg);
+  container.appendChild(wrap);
+
+  const live = series.filter((s) => s.values.some((v) => v != null));
+  if (!live.length || !categories.length) {
+    const p = document.createElement("p");
+    p.className = "hint";
+    p.textContent = "표시할 데이터가 없습니다.";
+    container.appendChild(p);
+    return;
+  }
+
+  const all = live.flatMap((s) => s.values).filter((v) => v != null);
+  let lo = Math.min(0, ...all), hi = Math.max(0, ...all);
+  if (lo === hi) { hi = lo + 1; }
+  const pad = (hi - lo) * 0.06;
+  lo -= lo < 0 ? pad : 0;
+  hi += hi > 0 ? pad : 0;
+  const y = (v) => M.t + (hi - v) / (hi - lo) * (H - M.t - M.b);
+
+  for (const t of niceTicks(lo, hi, 5)) {
+    svg.appendChild(el("line", { x1: M.l, x2: W - M.r, y1: y(t), y2: y(t), stroke: "var(--grid)", "stroke-width": 1 }));
+    const lab = el("text", { x: M.l - 6, y: y(t) + 4, "text-anchor": "end", "font-size": 11, fill: "var(--muted)" });
+    lab.textContent = Math.abs(t) >= 10000 ? (t / 10000).toLocaleString("ko-KR") + "만" : t.toLocaleString("ko-KR");
+    svg.appendChild(lab);
+  }
+  // 0선
+  svg.appendChild(el("line", { x1: M.l, x2: W - M.r, y1: y(0), y2: y(0), stroke: "var(--baseline)", "stroke-width": 1.2 }));
+
+  const plotW = W - M.l - M.r;
+  const groupW = plotW / categories.length;
+  const barW = Math.max(2, (groupW * 0.72) / live.length);
+  const x0 = (ci) => M.l + groupW * ci + groupW * 0.14;
+
+  categories.forEach((cat, ci) => {
+    live.forEach((s, si) => {
+      const v = s.values[ci];
+      if (v == null) return;
+      const yTop = Math.min(y(v), y(0));
+      const h = Math.max(1, Math.abs(y(v) - y(0)));
+      const rect = el("rect", {
+        x: (x0(ci) + barW * si).toFixed(1), y: yTop.toFixed(1),
+        width: barW.toFixed(1), height: h.toFixed(1),
+        fill: `var(${s.cssVar})`, opacity: v < 0 ? 0.75 : 1,
+      });
+      const tt = el("title", {});
+      tt.textContent = `${cat} · ${s.name}: ${Math.round(v).toLocaleString("ko-KR")}${unit}`;
+      rect.appendChild(tt);
+      svg.appendChild(rect);
+    });
+    // x 라벨 — 카테고리 수가 많으면 건너뛰며 표기
+    const stride = Math.ceil(categories.length / 12);
+    if (ci % stride === 0) {
+      const lab = el("text", {
+        x: M.l + groupW * ci + groupW / 2, y: H - 8,
+        "text-anchor": "middle", "font-size": 11, fill: "var(--muted)",
+      });
+      lab.textContent = cat;
+      svg.appendChild(lab);
+    }
+  });
+  svg.appendChild(el("line", { x1: M.l, x2: W - M.r, y1: H - M.b, y2: H - M.b, stroke: "var(--baseline)", "stroke-width": 1 }));
+
+  // 범례
+  const lg = document.createElement("div");
+  lg.className = "legend";
+  for (const s of live) {
+    const item = document.createElement("span");
+    item.className = "lg";
+    const key = document.createElement("span");
+    key.className = "lg-key-sq";
+    key.style.background = `var(${s.cssVar})`;
+    const nm = document.createElement("span");
+    nm.textContent = s.name;
+    item.append(key, nm);
+    lg.appendChild(item);
+  }
+  container.appendChild(lg);
+}
