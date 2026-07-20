@@ -112,14 +112,13 @@ export function loadIssueStats() {
   );
 }
 
-// 월별 순발행 차트용 — 최근 13개월 발행행(net)만 (만기행 제외)
+// 월별 순발행 차트용 — kofia_issue_monthly(월 집계, 2006~). 3/5년 평균 계산에 6년치 로드
 export function loadIssueMonthly() {
   const from = new Date();
-  from.setMonth(from.getMonth() - 12);
-  from.setDate(1);
+  from.setFullYear(from.getFullYear() - 6);
+  const ym = from.toISOString().slice(0, 7);
   return fetchRecentSafe(
-    "kofia_issue_stats?select=stat_date,bond_class,net&net=not.is.null" +
-      `&stat_date=gte.${from.toISOString().slice(0, 10)}&order=stat_date.asc`
+    `kofia_issue_monthly?select=ym,bond_class,net&ym=gte.${ym}&order=ym.asc`
   );
 }
 

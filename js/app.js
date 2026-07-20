@@ -954,21 +954,30 @@ function renderIssue() {
       seg.appendChild(b);
     }
     const draw = (cls) => {
-      // 월별 합산 — 마지막 13개 키 중 최근 12개월
-      const byMonth = new Map();
+      // ym -> net (kofia_issue_monthly, 월 집계)
+      const byYm = new Map();
       for (const r of S.issueMonthly) {
-        if (r.bond_class !== cls || r.net == null) continue;
-        const k = r.stat_date.slice(0, 7);
-        byMonth.set(k, (byMonth.get(k) ?? 0) + r.net);
+        if (r.bond_class === cls && r.net != null) byYm.set(r.ym, r.net);
       }
-      const keys = [...byMonth.keys()].sort().slice(-12);
+      const keys = [...byYm.keys()].sort().slice(-12);
       const cats = keys.map((k) => `${k.slice(2, 4)}.${k.slice(5, 7)}`);
+      // 같은 달의 직전 N개년 평균 (있는 연도만 — 백필 범위 밖이면 표본에서 제외)
+      const avgN = (ym, n) => {
+        const y = +ym.slice(0, 4), mm = ym.slice(5, 7);
+        const vals = [];
+        for (let i = 1; i <= n; i++) {
+          const v = byYm.get(`${y - i}-${mm}`);
+          if (v != null) vals.push(v);
+        }
+        return vals.length ? vals.reduce((a, b) => a + b, 0) / vals.length : null;
+      };
       $("#is-chart-title", root).textContent =
-        `월별 순발행 (최근 1년) — ${cls === "계" ? "전체" : cls}`;
-      barChart($("#is-chart", root), cats,
-        [{ name: cls === "계" ? "전체 순발행" : `${cls} 순발행`, cssVar: "--series-2",
-           values: keys.map((k) => byMonth.get(k)) }],
-        { unit: "억" });
+        `월별 순발행 — ${cls === "계" ? "전체" : cls} (당월 vs 과거 3·5년 같은 달 평균)`;
+      barChart($("#is-chart", root), cats, [
+        { name: "당월", cssVar: "--series-2", values: keys.map((k) => byYm.get(k)) },
+        { name: "직전 3년 평균", cssVar: "--series-1", values: keys.map((k) => avgN(k, 3)) },
+        { name: "직전 5년 평균", cssVar: "--series-6", values: keys.map((k) => avgN(k, 5)) },
+      ], { unit: "억" });
     };
     if (!S.issueMonthly.length) {
       const p = document.createElement("p");
