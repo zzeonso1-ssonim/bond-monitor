@@ -963,6 +963,8 @@ function renderWeekly() {
       let cum = 0;
       const points = rows.map((r) => ({ d: r.trade_date, v: (cum += r.value) }));
       chartSeries.push({ name: def.name, cssVar: def.cssVar, points });
+      // 주간 = 최근 5영업일 순매수 합 (연초 누적은 차트로만)
+      const wk = rows.slice(-5).reduce((s, r) => s + r.value, 0);
       const tile = document.createElement("div");
       tile.className = "tile";
       const lab = document.createElement("div");
@@ -977,7 +979,7 @@ function renderWeekly() {
       val.appendChild(u);
       const del = document.createElement("div");
       del.className = "t-delta";
-      del.append("연초 누적 ", intDeltaSpan(cum));
+      del.append("주간(5영업일) ", intDeltaSpan(wk));
       tile.append(lab, val, del);
       tiles.appendChild(tile);
     }
