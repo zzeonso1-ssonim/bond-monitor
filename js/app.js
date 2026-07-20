@@ -84,6 +84,7 @@ export function applyMeta(meta) {
   renderRv();
   renderRegime();
   renderWeekly();
+  renderRates();
   renderTrades();
   renderOfferings();
   renderFlows();
@@ -960,6 +961,133 @@ function renderWeekly() {
   buildMarketTable($("#wk-mkt", root));
 }
 
+/* ══════════════ 선물·금리 (KRX 장내) ══════════════ */
+// (일자, 상품)별 근월물 연결 시계열 — 미결제약정 최대(없으면 거래량), 종가 없으면 정산가
+function frontSeries(prod) {
+  const byDate = new Map();
+  const rank = (x) => x.open_int ?? x.volume ?? 0;
+  for (const r of S.futures) {
+    if (r.prod !== prod || (r.close_price ?? r.settle) == null) continue;
+    const cur = byDate.get(r.trade_date);
+    if (!cur || rank(r) > rank(cur)) byDate.set(r.trade_date, r);
+  }
+  return [...byDate.keys()].sort().map((d) => {
+    const r = byDate.get(d);
+    return { d, v: r.close_price ?? r.settle, r };
+  });
+}
+
+// 지표물(명목/물가) 수익률 시계열 — 같은 날 지표물이 2개면 거래대금 큰 쪽
+function benchSeries(tenor, inflation = false) {
+  const byDate = new Map();
+  for (const r of S.govt) {
+    if (r.bench_type !== "지표" || r.is_inflation !== inflation) continue;
+    if (!inflation && r.tenor !== tenor) continue;
+    if (r.close_yield == null) continue;
+    const cur = byDate.get(r.trade_date);
+    if (!cur || (r.volume ?? 0) > (cur.volume ?? 0)) byDate.set(r.trade_date, r);
+  }
+  return [...byDate.keys()].sort().map((d) => ({ d, v: byDate.get(d).close_yield }));
+}
+
+function renderRates() {
+  const root = $("#view-rates");
+  root.innerHTML = `
+    <p class="section-sub" id="rt-sub"></p>
+    <p class="hint">KRX 장내 시세 · 선물은 근월물(미결제약정 최대) 연결 기준 · 최근 3개월</p>
+    <div class="tile-row" id="rt-tiles"></div>
+    <div class="card">
+      <div class="card-head">
+        <h2>국채선물 근월물 종가</h2><span class="hint">pt</span><span class="spacer"></span>
+        <div class="controls"><select class="ctl" id="rt-fut-sel"></select></div>
+      </div>
+      <div id="rt-fut-chart"></div>
+    </div>
+    <div class="card">
+      <div class="card-head"><h2>장내 국고 지표물 수익률</h2><span class="hint">%</span></div>
+      <div id="rt-govt-chart"></div>
+    </div>
+    <div class="card">
+      <div class="card-head"><h2>BEI (10년 국고 − 물가채)</h2><span class="hint">%p · 기대인플레이션</span></div>
+      <div id="rt-bei-chart"></div>
+    </div>`;
+
+  if (!S.futures.length && !S.govt.length) {
+    const p = document.createElement("p");
+    p.className = "hint";
+    p.textContent = "KRX 데이터 적재 중 (KRX_API_KEY 등록 후 매일 20:00 수집)";
+    $("#rt-tiles", root).appendChild(p);
+    return;
+  }
+
+  const latest = distinctDates([...S.futures, ...S.govt]).pop();
+  $("#rt-sub", root).textContent = `기준일 ${latest}`;
+
+  // BEI 시계열 — 명목 10Y − 물가채(실질), 교집합 날짜만
+  const nom10 = benchSeries("10");
+  const realMap = new Map(benchSeries("10", true).map((p) => [p.d, p.v]));
+  const bei = nom10.filter((p) => realMap.has(p.d)).map((p) => ({ d: p.d, v: p.v - realMap.get(p.d) }));
+
+  // 타일: 3·10·30년 선물 근월물(전일비는 KRX 제공 틱) + BEI
+  const tiles = $("#rt-tiles", root);
+  const addTile = (label, cur, delta, { digits = 2, unit = "" } = {}) => {
+    const tile = document.createElement("div");
+    tile.className = "tile";
+    const lab = document.createElement("div");
+    lab.className = "t-label";
+    lab.textContent = label;
+    const val = document.createElement("div");
+    val.className = "t-value";
+    val.textContent = fmt(cur, digits);
+    if (cur != null && unit) {
+      const u = document.createElement("span");
+      u.className = "unit";
+      u.textContent = unit;
+      val.appendChild(u);
+    }
+    const del = document.createElement("div");
+    del.className = "t-delta";
+    del.append("전일 ", deltaSpan(delta, digits));
+    tile.append(lab, val, del);
+    tiles.appendChild(tile);
+  };
+  for (const prod of ["KTB3", "KTB10", "KTB30"]) {
+    const s = frontSeries(prod);
+    const last = s[s.length - 1];
+    addTile(FUT_NAMES[prod], last?.v ?? null, last?.r.change ?? null, { unit: "pt" });
+  }
+  const beiLast = bei[bei.length - 1];
+  const beiPrev = bei[bei.length - 2];
+  addTile("BEI 10년", beiLast?.v ?? null, beiLast && beiPrev ? beiLast.v - beiPrev.v : null, { unit: "%p" });
+
+  // 차트 1: 선물 근월물 (상품 선택)
+  const sel = $("#rt-fut-sel", root);
+  for (const prod of Object.keys(FUT_NAMES)) {
+    const op = document.createElement("option");
+    op.value = prod;
+    op.textContent = FUT_NAMES[prod];
+    sel.appendChild(op);
+  }
+  const drawFut = () => {
+    const s = frontSeries(sel.value).map(({ d, v }) => ({ d, v }));
+    lineChart($("#rt-fut-chart", root), [{ name: FUT_NAMES[sel.value], cssVar: "--series-1", points: s }],
+      { unit: "pt", digits: 2 });
+  };
+  sel.addEventListener("change", drawFut);
+  drawFut();
+
+  // 차트 2: 지표물 수익률 (만기 전체, 동일 % 축)
+  const tenors = ["2", "3", "5", "10", "20", "30"];
+  const govtSeries = tenors.map((t, i) => ({
+    name: `${t}년`, cssVar: SLOT_VARS[i % SLOT_VARS.length], points: benchSeries(t),
+  }));
+  lineChart($("#rt-govt-chart", root), govtSeries, { unit: "%", digits: 3 });
+
+  // 차트 3: BEI
+  lineChart($("#rt-bei-chart", root), [{ name: "BEI 10년", cssVar: "--series-4", points: bei }],
+    { unit: "%p", digits: 2 });
+}
+
 /* ══════════════ 거래현황 (KRX 일반채권시장) ══════════════ */
 // 종목 분류: 여전채 / 회사채·기타 / null(국공채류 제외)
 function corpClass(nm) {
@@ -1306,7 +1434,7 @@ async function main() {
   try {
     const [series, market, stats, meta, futures, govt, corp, dart, flows] = await Promise.all([
       loadSpreadSeries(), loadMarket(), loadRegimeStats(), loadWebMeta(),
-      loadKrxFutures(30), loadKrxGovt(30), loadKrxCorp(10), loadDartOfferings(90),
+      loadKrxFutures(95), loadKrxGovt(95), loadKrxCorp(10), loadDartOfferings(90),
       loadInvestorFlows(95),
     ]);
     S.series = series;
