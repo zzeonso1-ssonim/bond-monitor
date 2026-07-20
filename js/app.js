@@ -858,7 +858,7 @@ function renderIssue() {
       <thead><tr><th>채권종류</th><th>발행액</th><th>상환액</th><th>순발행</th><th>전주 순발행</th></tr></thead>
       <tbody id="wk-iss"></tbody></table></div>
     <div class="section-title">만기통계 (만기도래·예정)</div>
-    <p class="section-sub" id="wk-mat-sub">억원 · 금주 실적 + 향후 2주 예정</p>
+    <p class="section-sub" id="wk-mat-sub">억원 · 금주 실적 + 향후 2주 예정 · 특은채 만기 분해는 2026-07-21부터 축적(초기엔 금주 일부 누락 가능)</p>
     <div class="table-scroll"><table class="data">
       <thead><tr><th>채권종류</th><th>금주</th><th>다음주</th><th>다다음주</th></tr></thead>
       <tbody id="wk-mat"></tbody></table></div>
@@ -892,21 +892,31 @@ function renderIssue() {
       const d1 = issDates.slice(-5);
       if (d1.length) $("#wk-iss-sub", root).textContent =
         `KOFIA 발행시장 · 억원 · 금주 ${d1[0]} ~ ${d1[d1.length - 1]} 합산 · 전주 = 직전 5영업일`;
-      for (const cls of CLASSES) {
+      const issRow = (label, issued, redeemed, net, prevNet) => {
         const tr = document.createElement("tr");
         const nm = document.createElement("td");
-        nm.textContent = cls === "계" ? "전체" : cls;
+        nm.textContent = label;
         tr.appendChild(nm);
-        const issued = sum(wk1, cls, "issued");
-        const redeemed = sum(wk1, cls, "redeemed");
         const td1 = document.createElement("td");
         td1.textContent = issued == null ? "—" : Math.round(issued).toLocaleString("ko-KR");
         const td2 = document.createElement("td");
         td2.textContent = redeemed == null ? "—" : Math.round(redeemed).toLocaleString("ko-KR");
         tr.append(td1, td2);
-        tr.appendChild(intTd(sum(wk1, cls, "net")));
-        tr.appendChild(intTd(sum(wk0, cls, "net")));
+        tr.appendChild(intTd(net));
+        tr.appendChild(intTd(prevNet));
         issBody.appendChild(tr);
+      };
+      for (const cls of CLASSES) {
+        issRow(cls === "계" ? "전체" : cls,
+          sum(wk1, cls, "issued"), sum(wk1, cls, "redeemed"),
+          sum(wk1, cls, "net"), sum(wk0, cls, "net"));
+        // 은행채 하위 분해 — 특은채(산금·중금·수출입·농협·수협) 발행분 분리 (발행액만 집계)
+        if (cls === "은행채") {
+          const sb1 = sum(wk1, "특은채", "issued");
+          const bank1 = sum(wk1, "은행채", "issued");
+          issRow("└ 특은채", sb1, null, null, null);
+          issRow("└ 은행채(일반)", sb1 != null && bank1 != null ? bank1 - sb1 : null, null, null, null);
+        }
       }
 
       // 만기 — 달력 주(월~일) 기준: 금주 / 다음주 / 다다음주
@@ -926,11 +936,10 @@ function renderIssue() {
         arr[idx] = (arr[idx] ?? 0) + r.matured;
         matSum.set(r.bond_class, arr);
       }
-      for (const cls of CLASSES) {
-        const arr = matSum.get(cls) ?? [null, null, null];
+      const matRow = (label, arr) => {
         const tr = document.createElement("tr");
         const nm = document.createElement("td");
-        nm.textContent = cls === "계" ? "전체" : cls;
+        nm.textContent = label;
         tr.appendChild(nm);
         for (const v of arr) {
           const td = document.createElement("td");
@@ -938,6 +947,15 @@ function renderIssue() {
           tr.appendChild(td);
         }
         matBody.appendChild(tr);
+      };
+      for (const cls of CLASSES) {
+        matRow(cls === "계" ? "전체" : cls, matSum.get(cls) ?? [null, null, null]);
+        if (cls === "은행채") {
+          const bank = matSum.get("은행채") ?? [null, null, null];
+          const sb = matSum.get("특은채") ?? [null, null, null];
+          matRow("└ 특은채", sb);
+          matRow("└ 은행채(일반)", bank.map((v, i) => (v != null && sb[i] != null ? v - sb[i] : null)));
+        }
       }
     }
   }
