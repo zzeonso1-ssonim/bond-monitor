@@ -4,7 +4,7 @@ import {
   REGIME_LABELS, MARKET_SYMBOLS, MARKET_TABLE, SLOT_VARS,
 } from "./config.js";
 import { loadSpreadSeries, loadMarket, loadRegimeStats, loadWebMeta } from "./api.js";
-import { lineChart, regimeRangeChart } from "./charts.js";
+import { lineChart, regimeRangeChart, dualSpreadChart } from "./charts.js";
 
 const $ = (sel, root = document) => root.querySelector(sel);
 
@@ -426,10 +426,13 @@ function updateMonitorChart() {
       box.appendChild(p);
       return;
     }
-    // 나중 클릭(B) − 먼저 클릭(A) 수익률차 ×100 (bp)
+    // 채권 리서치 관례 이축 차트 — 좌축: A·B 금리(%), 우축: 스프레드 B−A(bp) 영역형
     $("#mon-title").textContent = `${mon.b} − ${mon.a} (bp)`;
-    const pts = lastYear(diffPoints(mon.b, mon.a));
-    lineChart(box, [{ name: `${mon.b} − ${mon.a}`, cssVar: SLOT_VARS[0], points: pts }], { unit: "bp", digits: 1, zeroLine: true });
+    dualSpreadChart(box, {
+      a: { name: mon.a, points: lastYear(yPoints(seriesOf(mon.a))) },
+      b: { name: mon.b, points: lastYear(yPoints(seriesOf(mon.b))) },
+      spread: { name: "스프레드(우, bp)", points: lastYear(diffPoints(mon.b, mon.a)) },
+    });
     return;
   }
   hint.textContent = "최근 1년";
@@ -635,15 +638,15 @@ function renderRv() {
   const root = $("#view-rv");
   root.innerHTML = `
     <p class="section-sub">동일 만기 수익률차(bp) · 행을 클릭하면 그룹 추이가 표시됩니다</p>
+    <div class="card">
+      <div class="card-head"><h2 id="rv-title"></h2><span class="hint">1·2·3년, bp</span></div>
+      <div id="rv-chart"></div>
+    </div>
     <div class="table-scroll">
       <table class="data">
         <thead><tr><th>지표</th><th>현재(bp)</th><th>전일(bp)</th><th>1주(bp)</th><th>1개월(bp)</th></tr></thead>
         <tbody id="rv-body"></tbody>
       </table>
-    </div>
-    <div class="card">
-      <div class="card-head"><h2 id="rv-title"></h2><span class="hint">1·2·3년, bp</span></div>
-      <div id="rv-chart"></div>
     </div>
     <div id="rv-regime"></div>`;
 

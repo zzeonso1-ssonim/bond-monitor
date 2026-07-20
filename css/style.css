@@ -152,12 +152,14 @@ main { max-width: 1180px; margin: 0 auto; padding: 20px 24px 48px; }
 .viz-tooltip .tt-date { color: var(--muted); margin-bottom: 4px; }
 .viz-tooltip .tt-row { display: flex; align-items: center; gap: 7px; }
 .viz-tooltip .tt-key { width: 14px; height: 0; border-top: 2.5px solid; border-radius: 2px; }
+.viz-tooltip .tt-key-sq { width: 10px; height: 10px; border-radius: 2px; flex: none; } /* 영역 시리즈용 사각 키 */
 .viz-tooltip .tt-val { font-weight: 650; margin-left: auto; font-variant-numeric: tabular-nums; }
 .viz-tooltip .tt-name { color: var(--text-secondary); }
 
 .legend { display: flex; gap: 16px; flex-wrap: wrap; font-size: 12.5px; color: var(--text-secondary); margin: 4px 2px 0; }
 .legend .lg { display: inline-flex; align-items: center; gap: 6px; }
 .legend .lg-key { width: 16px; height: 0; border-top: 2.5px solid; border-radius: 2px; }
+.legend .lg-key-sq { width: 10px; height: 10px; border-radius: 2px; flex: none; } /* 영역 시리즈용 사각 키 */
 
 /* ── 컨트롤 ── */
 .controls { display: flex; gap: 10px; flex-wrap: wrap; align-items: center; margin: 14px 0 4px; }
