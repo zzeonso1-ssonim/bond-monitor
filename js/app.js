@@ -7,7 +7,7 @@ import {
 import {
   loadSpreadSeries, loadMarket, loadRegimeStats, loadWebMeta,
   loadKrxFutures, loadKrxCorp, loadDartOfferings, loadDartDetails,
-  loadInvestorFlows, loadFuturesForeign,
+  loadInvestorFlows, loadFuturesForeign, loadIssueStats,
 } from "./api.js";
 import { lineChart, regimeRangeChart, dualSpreadChart, barChart } from "./charts.js";
 
@@ -17,7 +17,7 @@ const $ = (sel, root = document) => root.querySelector(sel);
 const S = {
   series: new Map(), market: new Map(),
   stats: { regime: new Map(), rv: new Map(), xcurve: new Map() },
-  futures: [], corp: [], dart: [], dartDetails: [], flows: [], futFrg: [],
+  futures: [], corp: [], dart: [], dartDetails: [], flows: [], futFrg: [], issue: [],
   asof: "",
 };
 
@@ -868,6 +868,16 @@ function renderWeekly() {
       <div class="card-head"><h2>연초 이후 누적 순매수</h2><span class="hint">계약</span></div>
       <div id="wk-frg-chart"></div>
     </div>
+    <div class="section-title">발행통계 (금주)</div>
+    <p class="section-sub" id="wk-iss-sub">KOFIA 발행시장 · 억원 · 최근 5영업일 합산, 전주 = 그 직전 5영업일</p>
+    <div class="table-scroll"><table class="data">
+      <thead><tr><th>채권종류</th><th>발행액</th><th>상환액</th><th>순발행</th><th>전주 순발행</th></tr></thead>
+      <tbody id="wk-iss"></tbody></table></div>
+    <div class="section-title">만기통계 (만기도래·예정)</div>
+    <p class="section-sub" id="wk-mat-sub">KOFIA 발행시장 · 억원 · 금주 실적 + 향후 2주 예정</p>
+    <div class="table-scroll"><table class="data">
+      <thead><tr><th>채권종류</th><th>금주</th><th>다음주</th><th>다다음주</th></tr></thead>
+      <tbody id="wk-mat"></tbody></table></div>
     <div class="section-title">시장지표 주간</div>
     <div class="table-scroll"><table class="data">
       <thead><tr><th>지표</th><th>종가</th><th>전일비</th><th>주간변동률(%)</th></tr></thead>
@@ -983,7 +993,80 @@ function renderWeekly() {
     }
   }
 
-  // 4) 시장지표 주간 — 접이식과 동일 로직, 항상 펼침
+  // 4) 발행통계(금주 vs 전주) + 만기통계(금주·향후 2주) — kofia_issue_stats
+  {
+    const CLASSES = ["국채", "지방채", "특수채", "통안증권", "은행채", "기타금융채", "회사채", "ABS", "계"];
+    const issBody = $("#wk-iss", root);
+    const matBody = $("#wk-mat", root);
+    if (!S.issue.length) {
+      hintRow(issBody, 5, "데이터 적재 준비 중 (sync_issue_stats 실행 후 표시됩니다)");
+      hintRow(matBody, 4, "데이터 적재 준비 중");
+    } else {
+      // 발행 — issued 가 있는 일자(영업일)만, 최근 5일=금주 / 그 전 5일=전주
+      const issDates = distinctDates(S.issue.filter((r) => r.issued != null));
+      const wk1 = new Set(issDates.slice(-5));
+      const wk0 = new Set(issDates.slice(-10, -5));
+      const sum = (dates, cls, field) => {
+        let v = 0, has = false;
+        for (const r of S.issue) {
+          if (dates.has(r.stat_date) && r.bond_class === cls && r[field] != null) { v += r[field]; has = true; }
+        }
+        return has ? v : null;
+      };
+      const d1 = issDates.slice(-5);
+      if (d1.length) $("#wk-iss-sub", root).textContent =
+        `KOFIA 발행시장 · 억원 · 금주 ${d1[0]} ~ ${d1[d1.length - 1]} 합산 · 전주 = 직전 5영업일`;
+      for (const cls of CLASSES) {
+        const tr = document.createElement("tr");
+        const nm = document.createElement("td");
+        nm.textContent = cls === "계" ? "전체" : cls;
+        tr.appendChild(nm);
+        const issued = sum(wk1, cls, "issued");
+        const redeemed = sum(wk1, cls, "redeemed");
+        const td1 = document.createElement("td");
+        td1.textContent = issued == null ? "—" : Math.round(issued).toLocaleString("ko-KR");
+        const td2 = document.createElement("td");
+        td2.textContent = redeemed == null ? "—" : Math.round(redeemed).toLocaleString("ko-KR");
+        tr.append(td1, td2);
+        tr.appendChild(intTd(sum(wk1, cls, "net")));
+        tr.appendChild(intTd(sum(wk0, cls, "net")));
+        issBody.appendChild(tr);
+      }
+
+      // 만기 — 달력 주(월~일) 기준: 금주 / 다음주 / 다다음주
+      const weekStart = (iso) => {
+        const d = new Date(iso + "T00:00:00Z");
+        d.setUTCDate(d.getUTCDate() - (d.getUTCDay() + 6) % 7);
+        return d.toISOString().slice(0, 10);
+      };
+      const thisWeek = weekStart(new Date().toISOString().slice(0, 10));
+      const wkIdx = (iso) => Math.round((new Date(weekStart(iso)) - new Date(thisWeek)) / (7 * 86400000));
+      const matSum = new Map(); // cls -> [금주, 차주, 차차주]
+      for (const r of S.issue) {
+        if (r.matured == null) continue;
+        const idx = wkIdx(r.stat_date);
+        if (idx < 0 || idx > 2) continue;
+        const arr = matSum.get(r.bond_class) ?? [null, null, null];
+        arr[idx] = (arr[idx] ?? 0) + r.matured;
+        matSum.set(r.bond_class, arr);
+      }
+      for (const cls of CLASSES) {
+        const arr = matSum.get(cls) ?? [null, null, null];
+        const tr = document.createElement("tr");
+        const nm = document.createElement("td");
+        nm.textContent = cls === "계" ? "전체" : cls;
+        tr.appendChild(nm);
+        for (const v of arr) {
+          const td = document.createElement("td");
+          td.textContent = v == null ? "—" : Math.round(v).toLocaleString("ko-KR");
+          tr.appendChild(td);
+        }
+        matBody.appendChild(tr);
+      }
+    }
+  }
+
+  // 5) 시장지표 주간 — 접이식과 동일 로직, 항상 펼침
   buildMarketTable($("#wk-mkt", root));
 }
 
@@ -1505,10 +1588,10 @@ function renderFlows() {
 /* ══════════════ 부트스트랩 ══════════════ */
 async function main() {
   try {
-    const [series, market, stats, meta, futures, corp, dart, dartDetails, flows, futFrg] = await Promise.all([
+    const [series, market, stats, meta, futures, corp, dart, dartDetails, flows, futFrg, issue] = await Promise.all([
       loadSpreadSeries(), loadMarket(), loadRegimeStats(), loadWebMeta(),
       loadKrxFutures(30), loadKrxCorp(35), loadDartOfferings(90),
-      loadDartDetails(7), loadInvestorFlows(200), loadFuturesForeign(),
+      loadDartDetails(7), loadInvestorFlows(200), loadFuturesForeign(), loadIssueStats(),
     ]);
     S.series = series;
     S.market = market;
@@ -1519,6 +1602,7 @@ async function main() {
     S.dartDetails = dartDetails;
     S.flows = flows;
     S.futFrg = futFrg;
+    S.issue = issue;
 
     // 기준일 — 스프레드 데이터 최신 일자 (없으면 시장지표 최신 일자)
     let asof = "";

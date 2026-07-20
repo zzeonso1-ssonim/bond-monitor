@@ -102,6 +102,16 @@ export function loadInvestorFlows(days = 95) {
   );
 }
 
+// KOFIA 발행·만기 통계(억원) — 최근 8주 + 만기 예정(미래 3주). 테이블 미생성 시 빈 배열
+export function loadIssueStats() {
+  const from = sinceISO(56);
+  const to = new Date(Date.now() + 21 * 86400 * 1000).toISOString().slice(0, 10);
+  return fetchRecentSafe(
+    "kofia_issue_stats?select=stat_date,bond_class,issued,redeemed,net,outstanding,matured" +
+      `&stat_date=gte.${from}&stat_date=lte.${to}&order=stat_date.asc`
+  );
+}
+
 // 외국인 국채선물 일별 순매수(계약) — market_daily 심볼 KTB3F_FRG(3년)/KTB10F_FRG(10년), 연초부터
 // 소스: KRX 정보데이터시스템 통계(로그인 세션 필요) → 수집 절차는 bond-spread-system WORKLOG 참조
 export function loadFuturesForeign() {
