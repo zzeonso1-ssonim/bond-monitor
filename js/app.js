@@ -1005,7 +1005,8 @@ function renderWeekly() {
       hintRow(matBody, 4, "데이터 적재 준비 중");
     } else {
       // 발행 — issued 가 있는 일자(영업일)만, 최근 5일=금주 / 그 전 5일=전주
-      const issDates = distinctDates(S.issue.filter((r) => r.issued != null));
+      // (이 테이블은 trade_date 가 아니라 stat_date — distinctDates 사용 불가)
+      const issDates = [...new Set(S.issue.filter((r) => r.issued != null).map((r) => r.stat_date))].sort();
       const wk1 = new Set(issDates.slice(-5));
       const wk0 = new Set(issDates.slice(-10, -5));
       const sum = (dates, cls, field) => {
