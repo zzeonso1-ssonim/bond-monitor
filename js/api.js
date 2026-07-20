@@ -17,6 +17,19 @@ async function fetchPaged(path) {
   }
 }
 
+// web_meta 화면 구성 메타 (key='bond-monitor', 파이프라인 specs.py 가 단일 소스)
+// 테이블 미생성(404)·행 없음·네트워크 오류 시 null 반환 → 호출부가 config.js 폴백 사용
+export async function loadWebMeta() {
+  try {
+    const res = await fetch(`${SUPABASE_URL}/rest/v1/web_meta?select=payload&key=eq.bond-monitor`, { headers: HEADERS });
+    if (!res.ok) return null;
+    const rows = await res.json();
+    return rows?.[0]?.payload ?? null;
+  } catch {
+    return null;
+  }
+}
+
 // bond_spread_daily 전체(2025-05-30~) → Map(label -> [{d, y, bp}] 날짜 오름차순)
 export async function loadSpreadSeries() {
   const rows = await fetchPaged(

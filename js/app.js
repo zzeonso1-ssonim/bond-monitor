@@ -1,15 +1,79 @@
 // 본드모니터 — 화면 로직 (순수 바닐라 ES 모듈, 외부 의존 없음)
 import {
-  MONITOR_GROUPS, MATRIX_GROUPS, MATRIX_MATS, XCURVE_DEFS, RV_DEFS,
+  MONITOR_GROUPS, MATRIX_GROUPS, XCURVE_DEFS, RV_DEFS,
   REGIME_LABELS, MARKET_SYMBOLS, MARKET_TABLE, SLOT_VARS,
 } from "./config.js";
-import { loadSpreadSeries, loadMarket, loadRegimeStats } from "./api.js";
+import { loadSpreadSeries, loadMarket, loadRegimeStats, loadWebMeta } from "./api.js";
 import { lineChart, regimeRangeChart } from "./charts.js";
 
 const $ = (sel, root = document) => root.querySelector(sel);
 
 // 전역 상태 — 로드된 데이터
 const S = { series: new Map(), market: new Map(), stats: { regime: new Map(), rv: new Map(), xcurve: new Map() }, asof: "" };
+
+/* ══ 화면 구성 해석 계층 — 단일 소스: Supabase web_meta(specs.py), 없으면 config.js 폴백 ══ */
+// 모든 화면은 CFG 만 참조한다 — 지표 추가 시 웹 코드 수정 불필요
+let CFG = null;
+
+// 라벨 끝의 만기(년) 파싱: "특수채 AAA 5년" → 5
+function parseMat(label) {
+  const m = /(\d+)년$/.exec(label || "");
+  return m ? +m[1] : null;
+}
+
+// 심리지표 색 슬롯 — 메타에 색 정보가 없으므로 인덱스 기반 자동 배정
+function xcurveVar(i) {
+  if (i === 0) return "--series-1";
+  if (i === 1) return "--series-2";
+  if (i === 2) return "--series-6";
+  return SLOT_VARS[i % SLOT_VARS.length];
+}
+
+// web_meta payload → 화면 구성 객체 (필드별로 메타 우선, 비면 config.js 폴백)
+export function resolveConfig(meta) {
+  const m = meta || {};
+
+  const monitorGroups = Array.isArray(m.monitor_groups) && m.monitor_groups.length
+    ? m.monitor_groups : MONITOR_GROUPS;
+
+  // 매트릭스 — 메타는 {sector, labels}, 폴백은 {sector, labelPrefix, mats} → {sector, cells:[{label, mat}]} 로 정규화
+  const rawMatrix = Array.isArray(m.matrix_groups) && m.matrix_groups.length
+    ? m.matrix_groups
+    : MATRIX_GROUPS.map((g) => ({ sector: g.sector, labels: g.mats.map((mt) => `${g.labelPrefix} ${mt}년`) }));
+  const matrixGroups = rawMatrix.map((g) => ({
+    sector: g.sector,
+    cells: (g.labels || []).map((l) => ({ label: l, mat: parseMat(l) })).filter((c) => c.mat != null),
+  }));
+  // 열 = 전체 그룹 만기의 합집합 (그룹별 labels 길이가 달라도 동작)
+  const matSet = new Set();
+  for (const g of matrixGroups) for (const c of g.cells) matSet.add(c.mat);
+  const matrixMats = [...matSet].sort((a, b) => a - b);
+
+  const xcurveDefs = (Array.isArray(m.xcurve_defs) && m.xcurve_defs.length ? m.xcurve_defs : XCURVE_DEFS)
+    .map((d, i) => ({ label: d.label, a: d.a, b: d.b, cssVar: xcurveVar(i) }));
+
+  const rvGroups = Array.isArray(m.rv_groups) && m.rv_groups.length ? m.rv_groups : RV_DEFS;
+
+  const regimeLabels = Array.isArray(m.regime_labels) && m.regime_labels.length
+    ? m.regime_labels : REGIME_LABELS;
+
+  // 시장지표 — 메타는 {name, items}, 폴백은 {group, items} → name 으로 통일
+  const marketGroups = (Array.isArray(m.market_groups) && m.market_groups.length ? m.market_groups : MARKET_TABLE)
+    .map((g) => ({ name: g.name ?? g.group, items: g.items || [] }));
+
+  return { monitorGroups, matrixGroups, matrixMats, xcurveDefs, rvGroups, regimeLabels, marketGroups };
+}
+
+// 메타 적용 + 전 화면 렌더 (재호출 안전 — 뷰는 innerHTML 로 재구성됨)
+export function applyMeta(meta) {
+  CFG = resolveConfig(meta);
+  GOVT_SET = new Set(CFG.monitorGroups.filter((g) => g.govt).flatMap((g) => g.labels || []));
+  renderMonitor();
+  renderMatrix();
+  renderXcurve();
+  renderRv();
+  renderRegime();
+}
 
 /* ══ 테마 토글: 없음(시스템) → dark → light 순환, localStorage 유지 ══ */
 (function initTheme() {
@@ -119,11 +183,14 @@ function deltaSpan(v, digits = 1) {
 }
 
 /* ══════════════ 일간 모니터링 ══════════════ */
-const GOVT_SET = new Set(MONITOR_GROUPS.filter((g) => g.govt).flatMap((g) => g.labels));
+let GOVT_SET = new Set(); // applyMeta 에서 CFG.monitorGroups 기준으로 재계산
 // a/b: "두 지표 차이" 모드의 선택 라벨 2개 (B − A = 나중 클릭 − 먼저 클릭)
 const mon = { label: null, govt: false, mode: "y", a: null, b: null };
 
 function renderMonitor() {
+  // 재렌더 대비 상태 초기화
+  mon.mode = "y";
+  mon.a = mon.b = null;
   const root = $("#view-monitor");
   root.innerHTML = `
     <div class="tile-row" id="mon-tiles"></div>
@@ -188,9 +255,9 @@ function renderMonitor() {
   // 시장지표 접이식 표 — 전 심볼 종가·전일비·주간변동률
   buildMarketTable($("#mon-mkt-body", root));
 
-  // 30개 지표 요약 표
+  // 지표 요약 표 — 그룹·순서·govt 판정 모두 CFG 기반
   const body = $("#mon-body", root);
-  for (const g of MONITOR_GROUPS) {
+  for (const g of CFG.monitorGroups) {
     const gr = document.createElement("tr");
     gr.className = "group-row";
     const gtd = document.createElement("td");
@@ -199,7 +266,7 @@ function renderMonitor() {
     gr.appendChild(gtd);
     body.appendChild(gr);
 
-    for (const label of g.labels) {
+    for (const label of g.labels || []) {
       const arr = seriesOf(label);
       const yc = calcChanges(yPoints(arr));
       const tr = document.createElement("tr");
@@ -255,18 +322,18 @@ function renderMonitor() {
   });
 
   // 기본 선택: 첫 지표
-  const first = MONITOR_GROUPS[0];
-  selectMonitor(first.labels[0], !!first.govt);
+  const first = CFG.monitorGroups.find((g) => g.labels?.length);
+  if (first) selectMonitor(first.labels[0], !!first.govt);
 }
 
 // 시장지표 표 — 전일비는 절대변화(금리는 %p), 주간변동률은 (현재/1주전−1)×100 %, 금리만 주간도 %p 절대변화
 function buildMarketTable(body) {
-  for (const g of MARKET_TABLE) {
+  for (const g of CFG.marketGroups) {
     const gr = document.createElement("tr");
     gr.className = "group-row";
     const gtd = document.createElement("td");
     gtd.colSpan = 4;
-    gtd.textContent = g.group;
+    gtd.textContent = g.name;
     gr.appendChild(gtd);
     body.appendChild(gr);
 
@@ -397,7 +464,8 @@ function renderMatrix() {
   const th0 = document.createElement("th");
   th0.textContent = "섹터";
   head.appendChild(th0);
-  for (const m of MATRIX_MATS) {
+  // 만기 열 — CFG.matrixMats (전체 그룹 라벨에서 파싱한 만기의 합집합, 동적)
+  for (const m of CFG.matrixMats) {
     const th = document.createElement("th");
     th.textContent = `${m}년`;
     head.appendChild(th);
@@ -406,15 +474,16 @@ function renderMatrix() {
   // 셀 값 계산 (히트맵 농도 산정용 최댓값 포함)
   const rows = [];
   let maxV = 0;
-  for (const g of MATRIX_GROUPS) {
+  for (const g of CFG.matrixGroups) {
+    const byMat = new Map(g.cells.map((c) => [c.mat, c]));
     const items = [];
-    for (const m of MATRIX_MATS) {
-      if (!g.mats.includes(m)) { items.push(null); continue; }
-      const label = `${g.labelPrefix} ${m}년`;
-      const pts = bpPoints(seriesOf(label));
+    for (const m of CFG.matrixMats) {
+      const cell = byMat.get(m);
+      if (!cell) { items.push(null); continue; } // 이 그룹에 없는 만기 열
+      const pts = bpPoints(seriesOf(cell.label));
       const cur = pts.length ? pts[pts.length - 1].v : null;
       const prev5 = pts.length > 5 ? pts[pts.length - 6].v : null; // 5영업일 전
-      items.push({ label, mat: m, cur, chg: cur != null && prev5 != null ? cur - prev5 : null });
+      items.push({ label: cell.label, mat: m, cur, chg: cur != null && prev5 != null ? cur - prev5 : null });
       if (cur != null && cur > maxV) maxV = cur;
     }
     rows.push({ g, items });
@@ -488,9 +557,9 @@ function renderXcurve() {
   // 스탯 타일 — 현재 bp, 전일비·1주비
   const tiles = $("#xc-tiles", root);
   const chartSeries = [];
-  for (const def of XCURVE_DEFS) {
+  for (const def of CFG.xcurveDefs) {
     const pts = diffPoints(def.a, def.b);
-    chartSeries.push({ name: def.label, cssVar: SLOT_VARS[def.slot], points: pts });
+    chartSeries.push({ name: def.label, cssVar: def.cssVar, points: pts });
     const c = calcChanges(pts);
     const tile = document.createElement("div");
     tile.className = "tile";
@@ -581,7 +650,7 @@ function renderRv() {
     <div id="rv-regime"></div>`;
 
   const body = $("#rv-body", root);
-  for (const g of RV_DEFS) {
+  for (const g of CFG.rvGroups) {
     const gr = document.createElement("tr");
     gr.className = "group-row";
     const gtd = document.createElement("td");
@@ -613,11 +682,13 @@ function renderRv() {
     selectRvGroup(tr.dataset.group, tr.dataset.pair);
   });
 
-  selectRvGroup(RV_DEFS[0].group, RV_DEFS[0].pairs[0].label);
+  const firstG = CFG.rvGroups.find((g) => g.pairs?.length);
+  if (firstG) selectRvGroup(firstG.group, firstG.pairs[0].label);
 }
 
 function selectRvGroup(groupName, pairLabel) {
-  rvGroup = RV_DEFS.find((g) => g.group === groupName) || RV_DEFS[0];
+  rvGroup = CFG.rvGroups.find((g) => g.group === groupName) || CFG.rvGroups[0];
+  if (!rvGroup?.pairs?.length) return;
   const pair = rvGroup.pairs.find((p) => p.label === pairLabel) || rvGroup.pairs[0];
   const mat = pair.label.split(" ").pop(); // 라벨 끝의 만기 ("1년" 등)
   for (const tr of document.querySelectorAll("#rv-body tr.sel-row")) tr.classList.toggle("selected", tr.dataset.pair === pair.label);
@@ -671,7 +742,7 @@ function selectRvGroup(groupName, pairLabel) {
 /* ══════════════ 국면별 분석 ══════════════ */
 function renderRegime() {
   const root = $("#view-regime");
-  const labels = REGIME_LABELS.filter((l) => S.stats.regime.has(l));
+  const labels = CFG.regimeLabels.filter((l) => S.stats.regime.has(l));
   if (!labels.length) {
     root.innerHTML = "";
     const p = document.createElement("p");
@@ -725,7 +796,9 @@ function renderRegime() {
 /* ══════════════ 부트스트랩 ══════════════ */
 async function main() {
   try {
-    const [series, market, stats] = await Promise.all([loadSpreadSeries(), loadMarket(), loadRegimeStats()]);
+    const [series, market, stats, meta] = await Promise.all([
+      loadSpreadSeries(), loadMarket(), loadRegimeStats(), loadWebMeta(),
+    ]);
     S.series = series;
     S.market = market;
     S.stats = stats;
@@ -743,11 +816,8 @@ async function main() {
     $("#asof").textContent = asof ? `기준일 ${asof}` : "";
     $("#loading").style.display = "none";
 
-    renderMonitor();
-    renderMatrix();
-    renderXcurve();
-    renderRv();
-    renderRegime();
+    // 화면 구성: web_meta 있으면 메타, 없으면(null) config.js 폴백 — applyMeta 가 전 화면 렌더
+    applyMeta(meta);
   } catch (err) {
     $("#loading").textContent = `데이터 로드 실패: ${err.message}`;
   }

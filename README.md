@@ -1,4 +1,4 @@
-# 본드모니터 (bond-spread-web)
+# 본드모니터 (bond-monitor)
 
 한국 채권 크레딧스프레드 모니터링 정적 웹앱. 순수 바닐라 ES 모듈(HTML/CSS/JS)로만 구성되어
 빌드 도구·외부 라이브러리·CDN 없이 동작한다.
@@ -13,11 +13,25 @@
   - `market_daily` — `{trade_date, symbol, value}`, symbol ∈ KOSPI / USDKRW / UST10Y
   - `bond_regime_stats` — 국면별 통계 `{kind: regime|rv|xcurve, label, bucket, ...}`
     (로컬 `run_daily` 실행 시 갱신 — `xcurve` 는 아직 빈 상태가 정상)
+  - `web_meta` — 화면 구성 메타 `{key: 'bond-monitor', payload jsonb}` (아래 참고)
+
+## 화면 구성 소스 — 하드코딩 금지 원칙
+
+지표 목록·그룹·순서는 **Supabase `web_meta` 테이블(key='bond-monitor')** 이 단일 소스다.
+파이프라인의 `specs.py` → `build_web_meta()` 가 매일 payload(jsonb) 로 동기화하며, 웹앱은
+로드 시 이를 읽어 `js/app.js` 의 `resolveConfig(meta)` 로 화면을 자동 구성한다.
+**지표를 추가해도 웹 코드 수정이 필요 없다** — specs.py 만 고치면 된다.
+
+- payload 필드: `monitor_groups` / `matrix_groups` / `xcurve_defs` / `rv_groups` / `regime_labels` / `market_groups`
+- `web_meta` 테이블이 없거나(404) 행이 없으면 `loadWebMeta()` 가 null 을 반환하고,
+  `js/config.js` 의 상수들이 **폴백 기본값** 으로 사용된다 (필드 단위로 폴백)
+- 매트릭스 만기 열은 labels 에서 "N년" 을 파싱한 전체 그룹 합집합으로 동적 구성
+- 심리지표 색은 인덱스 기반 자동 배정: 0→`--series-1`, 1→`--series-2`, 2→`--series-6`, 이후 `SLOT_VARS` 순환
 
 ## 로컬 실행
 
 ```bash
-cd bond-spread-web
+cd bond-monitor
 python3 -m http.server 8000
 # → http://localhost:8000
 ```
@@ -51,18 +65,20 @@ python3 -m http.server 8000
 ```
 index.html      셸(탭·섹션 골격)
 css/style.css   전체 스타일(라이트/다크 CSS 변수)
-js/config.js    Supabase 상수, 지표·그룹 정의 (MONITOR_GROUPS, MATRIX_GROUPS, XCURVE_DEFS, RV_DEFS, ...)
-js/api.js       PostgREST 읽기 헬퍼(페이지네이션 포함)
+js/config.js    Supabase 상수, 폴백 기본값(MONITOR_GROUPS, MATRIX_GROUPS, XCURVE_DEFS, RV_DEFS, ...)
+js/api.js       PostgREST 읽기 헬퍼(loadWebMeta 포함, 페이지네이션 처리)
 js/charts.js    경량 SVG 차트(lineChart, regimeRangeChart)
-js/app.js       화면 로직(5개 뷰 렌더링, 파생 계산)
+js/app.js       화면 로직(resolveConfig 구성 해석 + 5개 뷰 렌더링, 파생 계산)
 ```
 
 ## 확장 방법
 
-- **모니터링 지표 추가**: `config.js` 의 `MONITOR_GROUPS` 에 그룹/라벨 추가 (파이프라인이 해당 라벨을 적재해야 함)
-- **매트릭스 행 추가**: `MATRIX_GROUPS` 에 `{ sector, labelPrefix, mats }` 추가
-- **심리지표/상대가치 지표 추가**: `XCURVE_DEFS` / `RV_DEFS` 에 라벨 쌍 추가 —
-  국면 통계까지 보려면 bond-spread-system 의 `sync_supabase.py` 스펙에도 동일 라벨로 등록
-- **국면 분석 지표 추가**: `REGIME_LABELS` 에 라벨 추가 (kind='regime' 통계가 있어야 표시)
+**원칙: 지표 추가는 파이프라인의 `specs.py` 에서 한다.** `build_web_meta()` 가 `web_meta` 로
+동기화하면 웹앱이 자동 반영한다 — 웹 코드 수정 불필요.
+
+- 모니터링/매트릭스/심리지표/상대가치/국면/시장지표 모두 payload 의 해당 필드에 추가
+- 국면 통계까지 보려면 `sync_supabase.py` 스펙에도 동일 라벨로 등록 (통계가 있어야 표시됨)
+- `js/config.js` 의 상수는 `web_meta` 부재 시의 폴백일 뿐이다 — 신규 지표를 여기에 추가하지 말 것
+  (메타가 있으면 무시된다)
 
 데이터 문자열은 전부 `textContent` 로만 DOM 에 삽입한다(innerHTML 에 데이터 보간 금지).
