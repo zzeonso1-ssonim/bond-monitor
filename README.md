@@ -22,7 +22,8 @@
   - `bond_regime_stats` — 국면별 통계 `{kind: regime|rv|xcurve, label, bucket, ...}`
     (로컬 `run_daily` 실행 시 갱신 — `xcurve` 는 아직 빈 상태가 정상)
   - `web_meta` — 화면 구성 메타 `{key: 'bond-monitor', payload jsonb}` (아래 참고)
-  - `krx_futures_daily` / `krx_govt_daily` — KRX 국채선물·장내 국채 일별
+  - `krx_futures_daily` — KRX 국채선물 일별 (수급동향 탭 선물 수급에 표시)
+  - `krx_govt_daily` — KRX 장내 국채 일별 (파이프라인이 계속 적재하나 웹 화면에서는 미표시)
   - `krx_corp_daily` — KRX 일반채권시장 일별 (파이프라인이 계속 적재하나 웹 화면에서는 미표시)
   - `dart_offerings` — DART 채무증권 발행 공시 (DART_API_KEY 등록 후 적재)
   - `dart_offering_details` — 신고서 본문 파싱: 회차별 발행조건(등급·발행액·수요예측 밴드·주관사 등)

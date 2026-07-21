@@ -76,14 +76,6 @@ export function loadKrxFutures(days = 30) {
   );
 }
 
-// KRX 장내 국고채 일별 (지표물·물가채 포함)
-export function loadKrxGovt(days = 30) {
-  return fetchRecentSafe(
-    "krx_govt_daily?select=trade_date,isu_cd,isu_nm,tenor,bench_type,is_inflation,close_yield,volume" +
-      `&trade_date=gte.${sinceISO(days)}&order=trade_date.asc`
-  );
-}
-
 // KOFIA 투자자별 거래현황(수급동향, 억원) — 테이블 미생성·미적재 시 빈 배열
 export function loadInvestorFlows(days = 95) {
   return fetchRecentSafe(
