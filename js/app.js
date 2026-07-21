@@ -6,7 +6,7 @@ import {
 } from "./config.js";
 import {
   loadSpreadSeries, loadMarket, loadRegimeStats, loadWebMeta,
-  loadKrxFutures, loadKrxCorp, loadDartOfferings, loadDartDetails,
+  loadKrxFutures, loadDartOfferings, loadDartDetails,
   loadInvestorFlows, loadFuturesForeign, loadIssueStats, loadIssueMonthly,
 } from "./api.js";
 import { lineChart, regimeRangeChart, dualSpreadChart, barChart } from "./charts.js";
@@ -17,7 +17,7 @@ const $ = (sel, root = document) => root.querySelector(sel);
 const S = {
   series: new Map(), market: new Map(),
   stats: { regime: new Map(), rv: new Map(), xcurve: new Map() },
-  futures: [], corp: [], dart: [], dartDetails: [], flows: [], futFrg: [], issue: [], issueMonthly: [],
+  futures: [], dart: [], dartDetails: [], flows: [], futFrg: [], issue: [], issueMonthly: [],
   asof: "",
 };
 
@@ -84,7 +84,6 @@ export function applyMeta(meta) {
   renderRv();
   renderRegime();
   renderIssue();
-  renderTrades();
   renderOfferings();
   renderFlows();
 }
@@ -1016,173 +1015,6 @@ function renderIssue() {
   }
 }
 
-/* ══════════════ 거래현황 (KRX 일반채권시장) ══════════════ */
-// 종목 분류: 여전채 / 회사채·기타 / null(국공채류 제외)
-function corpClass(nm) {
-  const s = nm || "";
-  if (/카드|캐피탈/.test(s)) return "여전채";
-  if (/국민주택|지역개발|서울도시|국고|통안|주택금융/.test(s)) return null;
-  return "회사채·기타";
-}
-
-function renderTrades() {
-  const root = $("#view-trades");
-  root.innerHTML = `
-    <p class="section-sub" id="tr-sub"></p>
-    <p class="hint">KRX 일반채권시장 장내 체결 기준 · 장외 체결·개별민평 대비는 미포함</p>
-    <div class="controls"><div class="seg" id="tr-seg">
-      <button data-p="d" class="active">일간</button>
-      <button data-p="w">주간</button>
-      <button data-p="m">월간</button>
-    </div></div>
-    <div id="tr-top"></div>
-    <div class="section-title">수익률 변동 상위 (일간)</div>
-    <p class="section-sub">전 영업일에도 체결된 종목의 체결수익률 변동(bp)</p>
-    <div class="tile-row" id="tr-move"></div>`;
-
-  if (!S.corp.length) {
-    const p = document.createElement("p");
-    p.className = "hint";
-    p.textContent = "데이터 적재 중";
-    $("#tr-top", root).appendChild(p);
-    return;
-  }
-
-  const dates = distinctDates(S.corp);
-  const latest = dates[dates.length - 1];
-  const prevDate = dates.length > 1 ? dates[dates.length - 2] : null;
-  $("#tr-sub", root).textContent = `기준일 ${latest}`;
-  const todays = S.corp.filter((r) => r.trade_date === latest);
-
-  // 표 1: 거래대금 상위 10 — 기간 선택(일간/주간/월간), 주간·월간은 종목별 거래대금 합산
-  const PERIODS = { d: { label: "일간", days: 1 }, w: { label: "주간", days: 5 }, m: { label: "월간", days: 21 } };
-  let period = "d";
-  const drawTop = () => {
-    const top = $("#tr-top", root);
-    top.textContent = "";
-    const n = PERIODS[period].days;
-    const span = new Set(dates.slice(-n));
-    const spanStart = dates.slice(-n)[0];
-    const sub = document.createElement("p");
-    sub.className = "section-sub";
-    sub.textContent = period === "d" ? `일간 · 기준일 ${latest}`
-      : `${PERIODS[period].label} · ${spanStart} ~ ${latest} 거래대금 합산 (최근 ${Math.min(n, dates.length)}영업일)`;
-    top.appendChild(sub);
-    // 종목별 합산 (수익률은 기간 마지막 체결 기준)
-    const agg = new Map();
-    for (const r of S.corp) {
-      if (!span.has(r.trade_date)) continue;
-      const a = agg.get(r.isu_cd) ?? { nm: r.isu_nm, value: 0, last: null };
-      a.value += r.value ?? 0;
-      if (!a.last || r.trade_date > a.last.trade_date) a.last = r;
-      agg.set(r.isu_cd, a);
-    }
-    for (const cls of ["여전채", "회사채·기타"]) {
-      const rows = [...agg.values()].filter((a) => corpClass(a.nm) === cls)
-        .sort((a, b) => b.value - a.value).slice(0, 10);
-      const title = document.createElement("div");
-      title.className = "section-title";
-      title.textContent = `${cls} 거래대금 상위 10 (${PERIODS[period].label})`;
-      top.appendChild(title);
-      const scroll = document.createElement("div");
-      scroll.className = "table-scroll";
-      const table = document.createElement("table");
-      table.className = "data";
-      const thead = document.createElement("thead");
-      const hr = document.createElement("tr");
-      for (const h of ["종목명", "체결수익률(%)", "고가(%)", "저가(%)", "거래대금(억원)"]) {
-        const th = document.createElement("th");
-        th.textContent = h;
-        hr.appendChild(th);
-      }
-      thead.appendChild(hr);
-      const tbody = document.createElement("tbody");
-      for (const a of rows) {
-        const tr = document.createElement("tr");
-        const nm = document.createElement("td");
-        nm.textContent = a.nm ?? "—";
-        tr.appendChild(nm);
-        tr.appendChild(numTd(a.last?.close_yield, { digits: 3 }));
-        tr.appendChild(numTd(a.last?.high_yield, { digits: 3 }));
-        tr.appendChild(numTd(a.last?.low_yield, { digits: 3 }));
-        const val = document.createElement("td");
-        val.textContent = !a.value ? "—"
-          : (a.value / 1e8).toLocaleString("ko-KR", { maximumFractionDigits: 1 });
-        tr.appendChild(val);
-        tbody.appendChild(tr);
-      }
-      if (!rows.length) hintRow(tbody, 5, "해당 분류 체결 없음");
-      table.append(thead, tbody);
-      scroll.appendChild(table);
-      top.appendChild(scroll);
-    }
-  };
-  const seg = $("#tr-seg", root);
-  seg.addEventListener("click", (e) => {
-    const btn = e.target.closest("button");
-    if (!btn) return;
-    period = btn.dataset.p;
-    for (const b of seg.querySelectorAll("button")) b.classList.toggle("active", b === btn);
-    drawTop();
-  });
-  drawTop();
-
-  // 표 2: 수익률 변동 상위 — 전일 체결 종목과 isu_cd 조인
-  const move = $("#tr-move", root);
-  if (!prevDate) {
-    const p = document.createElement("p");
-    p.className = "hint";
-    p.textContent = "전 영업일 데이터 적재 후 제공됩니다";
-    move.appendChild(p);
-    return;
-  }
-  const prevMap = new Map(S.corp.filter((r) => r.trade_date === prevDate && r.close_yield != null)
-    .map((r) => [r.isu_cd, r.close_yield]));
-  const joined = todays
-    .filter((r) => r.close_yield != null && prevMap.has(r.isu_cd) && corpClass(r.isu_nm) != null)
-    .map((r) => ({ nm: r.isu_nm, prev: prevMap.get(r.isu_cd), cur: r.close_yield,
-      chg: (r.close_yield - prevMap.get(r.isu_cd)) * 100 }));
-  const mkMoveTable = (titleText, rows) => {
-    const box = document.createElement("div");
-    const title = document.createElement("div");
-    title.className = "section-title";
-    title.textContent = titleText;
-    box.appendChild(title);
-    const scroll = document.createElement("div");
-    scroll.className = "table-scroll";
-    const table = document.createElement("table");
-    table.className = "data";
-    const thead = document.createElement("thead");
-    const hr = document.createElement("tr");
-    for (const h of ["종목명", "전일(%)", "당일(%)", "변동(bp)"]) {
-      const th = document.createElement("th");
-      th.textContent = h;
-      hr.appendChild(th);
-    }
-    thead.appendChild(hr);
-    const tbody = document.createElement("tbody");
-    for (const r of rows) {
-      const tr = document.createElement("tr");
-      const nm = document.createElement("td");
-      nm.textContent = r.nm;
-      tr.appendChild(nm);
-      tr.appendChild(numTd(r.prev, { digits: 3 }));
-      tr.appendChild(numTd(r.cur, { digits: 3 }));
-      tr.appendChild(numTd(r.chg, { signed: true }));
-      tbody.appendChild(tr);
-    }
-    if (!rows.length) hintRow(tbody, 4, "해당 종목 없음");
-    table.append(thead, tbody);
-    scroll.appendChild(table);
-    box.appendChild(scroll);
-    return box;
-  };
-  move.append(
-    mkMoveTable("강세 상위 10 (수익률 하락)", [...joined].sort((a, b) => a.chg - b.chg).slice(0, 10)),
-    mkMoveTable("약세 상위 10 (수익률 상승)", [...joined].sort((a, b) => b.chg - a.chg).slice(0, 10)),
-  );
-}
-
 /* ══════════════ 발행정보 (DART 채무증권 공시) ══════════════ */
 // rcept_dt "20260718" | "2026-07-18" → "2026-07-18"
 function fmtRceptDt(v) {
@@ -1590,9 +1422,9 @@ function renderFlows() {
 /* ══════════════ 부트스트랩 ══════════════ */
 async function main() {
   try {
-    const [series, market, stats, meta, futures, corp, dart, dartDetails, flows, futFrg, issue, issueMonthly] = await Promise.all([
+    const [series, market, stats, meta, futures, dart, dartDetails, flows, futFrg, issue, issueMonthly] = await Promise.all([
       loadSpreadSeries(), loadMarket(), loadRegimeStats(), loadWebMeta(),
-      loadKrxFutures(30), loadKrxCorp(35), loadDartOfferings(90),
+      loadKrxFutures(30), loadDartOfferings(90),
       loadDartDetails(7), loadInvestorFlows(200), loadFuturesForeign(), loadIssueStats(),
       loadIssueMonthly(),
     ]);
@@ -1600,7 +1432,6 @@ async function main() {
     S.market = market;
     S.stats = stats;
     S.futures = futures;
-    S.corp = corp;
     S.dart = dart;
     S.dartDetails = dartDetails;
     S.flows = flows;

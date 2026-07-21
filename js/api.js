@@ -84,14 +84,6 @@ export function loadKrxGovt(days = 30) {
   );
 }
 
-// KRX 일반채권시장 전 종목 일별 (회사채·여전채 체결)
-export function loadKrxCorp(days = 10) {
-  return fetchRecentSafe(
-    "krx_corp_daily?select=trade_date,isu_cd,isu_nm,close_yield,high_yield,low_yield,close_price,volume,value" +
-      `&trade_date=gte.${sinceISO(days)}&order=trade_date.asc`
-  );
-}
-
 // KOFIA 투자자별 거래현황(수급동향, 억원) — 테이블 미생성·미적재 시 빈 배열
 export function loadInvestorFlows(days = 95) {
   return fetchRecentSafe(
