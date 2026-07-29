@@ -173,6 +173,16 @@ main { max-width: 1180px; margin: 0 auto; padding: 20px 24px 48px; }
 .card-head .spacer { flex: 1; }
 .chart-wrap { position: relative; }
 .chart-wrap svg { display: block; width: 100%; height: auto; }
+.chart-download {
+  position: absolute; top: 4px; right: 4px; z-index: 10;
+  appearance: none; border: 1px solid var(--border); border-radius: 7px;
+  background: color-mix(in srgb, var(--surface-1) 88%, transparent);
+  color: var(--text-secondary); padding: 4px 8px;
+  font: inherit; font-size: 11px; line-height: 1.2; cursor: pointer;
+  backdrop-filter: blur(3px);
+}
+.chart-download:hover { color: var(--text-primary); border-color: var(--accent); }
+.chart-download:disabled { opacity: 0.45; cursor: wait; }
 .viz-tooltip {
   position: absolute; pointer-events: none; z-index: 20;
   background: var(--surface-1); border: 1px solid var(--border);
@@ -290,7 +300,7 @@ table.data td.mx-cell.selected { outline: 2px solid var(--series-1); outline-off
   :root { --page: #ffffff; --surface-1: #ffffff; }
   body { background: #ffffff; font-size: 12px; }
   /* 화면 전용 요소 숨김 — 탭·버튼·푸터·접이식 요약 토글 */
-  .topbar, .foot, .pdf-btn, .theme-toggle { display: none !important; }
+  .topbar, .foot, .pdf-btn, .theme-toggle, .chart-download { display: none !important; }
   main { max-width: none; padding: 0; }
   .print-header {
     display: block; font-size: 16px; font-weight: 700; color: var(--accent-strong);
