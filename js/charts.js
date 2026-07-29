@@ -29,6 +29,91 @@ function fmtDateFull(iso) {
   return `${iso.slice(0, 4)}-${iso.slice(5, 7)}-${iso.slice(8, 10)}`;
 }
 
+const CHART_CSS_VARS = [
+  "--surface-1", "--text-primary", "--text-secondary", "--muted",
+  "--grid", "--baseline", "--accent-wash", "--series-1", "--series-2",
+  "--series-3", "--series-4", "--series-5", "--series-6", "--up", "--dn",
+];
+
+function chartFilename(container) {
+  const heading = container.closest(".card")?.querySelector(".card-head h2")?.textContent?.trim();
+  const label = heading || container.id || "차트";
+  const safe = label.replace(/[\\/:*?"<>|]+/g, "-").replace(/\s+/g, "-");
+  return `본드모니터-${safe}-${new Date().toISOString().slice(0, 10)}.png`;
+}
+
+async function downloadChartPng(svg, container) {
+  const clone = svg.cloneNode(true);
+  const viewBox = svg.viewBox.baseVal;
+  const width = viewBox.width || 960;
+  const height = viewBox.height || 300;
+  const scale = 2;
+  const styles = getComputedStyle(document.documentElement);
+
+  clone.setAttribute("xmlns", NS);
+  clone.setAttribute("width", width);
+  clone.setAttribute("height", height);
+  for (const name of CHART_CSS_VARS) {
+    clone.style.setProperty(name, styles.getPropertyValue(name).trim());
+  }
+  clone.style.fontFamily = getComputedStyle(document.body).fontFamily;
+
+  const bg = el("rect", {
+    x: 0, y: 0, width, height,
+    fill: styles.getPropertyValue("--surface-1").trim() || "#ffffff",
+  });
+  clone.insertBefore(bg, clone.firstChild);
+
+  const blob = new Blob([new XMLSerializer().serializeToString(clone)], {
+    type: "image/svg+xml;charset=utf-8",
+  });
+  const url = URL.createObjectURL(blob);
+  try {
+    const image = new Image();
+    image.decoding = "async";
+    image.src = url;
+    await image.decode();
+
+    const canvas = document.createElement("canvas");
+    canvas.width = width * scale;
+    canvas.height = height * scale;
+    const ctx = canvas.getContext("2d");
+    ctx.scale(scale, scale);
+    ctx.drawImage(image, 0, 0, width, height);
+
+    const png = await new Promise((resolve, reject) => {
+      canvas.toBlob((out) => out ? resolve(out) : reject(new Error("PNG 변환 실패")), "image/png");
+    });
+    const link = document.createElement("a");
+    link.href = URL.createObjectURL(png);
+    link.download = chartFilename(container);
+    link.click();
+    setTimeout(() => URL.revokeObjectURL(link.href), 0);
+  } finally {
+    URL.revokeObjectURL(url);
+  }
+}
+
+function addDownloadButton(wrap, svg, container) {
+  const button = document.createElement("button");
+  button.type = "button";
+  button.className = "chart-download";
+  button.textContent = "↓ PNG";
+  button.title = "차트를 PNG 이미지로 다운로드";
+  button.setAttribute("aria-label", "차트를 PNG 이미지로 다운로드");
+  button.addEventListener("click", async () => {
+    button.disabled = true;
+    try {
+      await downloadChartPng(svg, container);
+    } catch (err) {
+      console.error("차트 이미지 다운로드 실패", err);
+    } finally {
+      button.disabled = false;
+    }
+  });
+  wrap.appendChild(button);
+}
+
 // series: [{name, cssVar, points:[{d,v}]}] — 모든 시리즈는 동일 축(단위 동일)
 export function lineChart(container, series, opts = {}) {
   const W = 960, H = 300;
@@ -51,6 +136,7 @@ export function lineChart(container, series, opts = {}) {
     container.appendChild(p);
     return;
   }
+  addDownloadButton(wrap, svg, container);
 
   // 공통 날짜축(합집합, 오름차순)
   const dateSet = new Set();
@@ -251,6 +337,7 @@ export function regimeRangeChart(container, rows, opts = {}) {
   const svg = el("svg", { viewBox: `0 0 ${W} ${H}` });
   wrap.appendChild(svg);
   container.appendChild(wrap);
+  addDownloadButton(wrap, svg, container);
 
   for (const t of niceTicks(lo, hi, 6)) {
     svg.appendChild(el("line", { x1: x(t), x2: x(t), y1: M.t - 4, y2: H - M.b, stroke: "var(--grid)", "stroke-width": 1 }));
@@ -330,6 +417,7 @@ export function dualSpreadChart(container, data, opts = {}) {
     container.appendChild(p);
     return;
   }
+  addDownloadButton(wrap, svg, container);
 
   // 공통 날짜축 — 세 시리즈 합집합
   const dateSet = new Set();
@@ -393,15 +481,12 @@ export function dualSpreadChart(container, data, opts = {}) {
   const flushArea = (endIdx) => {
     if (runStart < 0) return;
     let fill = `M${x(runStart).toFixed(1)},${y0.toFixed(1)}`;
-    let edge = "";
     for (let i = runStart; i <= endIdx; i++) {
       const px = x(i).toFixed(1), py = yR(vS[i]).toFixed(1);
       fill += `L${px},${py}`;
-      edge += `${edge ? "L" : "M"}${px},${py}`;
     }
     fill += `L${x(endIdx).toFixed(1)},${y0.toFixed(1)}Z`;
     svg.appendChild(el("path", { d: fill, fill: "color-mix(in srgb, var(--series-6) 12%, transparent)", stroke: "none" }));
-    svg.appendChild(el("path", { d: edge, fill: "none", stroke: "var(--series-6)", "stroke-width": 1.5, "stroke-linejoin": "round" }));
     runStart = -1;
   };
   vS.forEach((v, i) => {
@@ -558,6 +643,7 @@ export function barChart(container, categories, series, opts = {}) {
     container.appendChild(p);
     return;
   }
+  addDownloadButton(wrap, svg, container);
 
   const all = live.flatMap((s) => s.values).filter((v) => v != null);
   let lo = Math.min(0, ...all), hi = Math.max(0, ...all);
