@@ -241,20 +241,16 @@ function renderMonitor() {
     <div class="tile-row" id="mon-tiles"></div>
     <div class="card">
       <div class="card-head">
-        <h2 id="ust-title">미국 국채 2Y · 10Y 금리</h2>
-        <span class="hint" id="ust-hint">최근 1년</span><span class="spacer"></span>
-        <div class="seg" id="ust-seg">
-          <button data-mode="yield" class="active">2Y · 10Y</button>
-          <button data-mode="curve">10Y−2Y</button>
-        </div>
+        <h2>미국 국채 2Y · 10Y 금리와 스프레드</h2>
+        <span class="hint" id="ust-hint">최근 1년 · 공통 거래일 기준</span>
       </div>
       <div id="ust-chart"></div>
     </div>
     <details class="mkt-details">
-      <summary>시장지표</summary>
+      <summary>시장지표 (환율·지수·해외금리·상품)</summary>
       <div class="table-scroll">
         <table class="data">
-          <thead><tr><th>지표</th><th>종가</th><th>전일비</th><th>주간변동률(%)</th></tr></thead>
+          <thead><tr><th>지표</th><th>종가</th><th>전일비</th><th>주간변동</th></tr></thead>
           <tbody id="mon-mkt-body"></tbody>
         </table>
       </div>
@@ -386,34 +382,18 @@ function renderMonitor() {
 function renderUsTreasuryChart(root) {
   const p2 = marketPoints("UST2Y");
   const p10 = marketPoints("UST10Y");
-  const d2 = p2[p2.length - 1]?.d ?? "—";
-  const d10 = p10[p10.length - 1]?.d ?? "—";
-  $("#ust-hint", root).textContent = `최근 1년 · 2Y ${d2} · 10Y ${d10}`;
-  let mode = "yield";
+  const spread = marketDiffPoints("UST10Y", "UST2Y");
+  const commonDates = new Set(spread.map((p) => p.d));
+  const common2 = p2.filter((p) => commonDates.has(p.d));
+  const common10 = p10.filter((p) => commonDates.has(p.d));
+  const commonAsOf = spread[spread.length - 1]?.d ?? "—";
 
-  const draw = () => {
-    if (mode === "yield") {
-      $("#ust-title", root).textContent = "미국 국채 2Y · 10Y 금리";
-      lineChart($("#ust-chart", root), [
-        { name: "미국채 2Y", cssVar: "--series-1", points: p2 },
-        { name: "미국채 10Y", cssVar: "--series-6", points: p10 },
-      ], { unit: "%", digits: 3, showLegend: true });
-    } else {
-      $("#ust-title", root).textContent = "미국 국채 10Y−2Y 스프레드";
-      lineChart($("#ust-chart", root), [
-        { name: "10Y−2Y", cssVar: "--series-6", points: marketDiffPoints("UST10Y", "UST2Y") },
-      ], { unit: "bp", digits: 1, zeroLine: true, showLegend: true });
-    }
-  };
-
-  $("#ust-seg", root).addEventListener("click", (e) => {
-    const btn = e.target.closest("button");
-    if (!btn || btn.dataset.mode === mode) return;
-    mode = btn.dataset.mode;
-    for (const b of $("#ust-seg", root).querySelectorAll("button")) b.classList.toggle("active", b === btn);
-    draw();
+  $("#ust-hint", root).textContent = `최근 1년 · 공통 기준일 ${commonAsOf}`;
+  dualSpreadChart($("#ust-chart", root), {
+    a: { name: "미국채 2Y (좌, %)", points: common2 },
+    b: { name: "미국채 10Y (좌, %)", points: common10 },
+    spread: { name: "10Y−2Y (우, bp)", points: spread },
   });
-  draw();
 }
 
 // 시장지표 표 — 전일비는 절대변화(금리는 %p), 주간변동률은 (현재/1주전−1)×100 %, 금리만 주간도 %p 절대변화

@@ -450,9 +450,9 @@ export function regimeRangeChart(container, rows, opts = {}) {
   container.appendChild(lg);
 }
 
-// ── 이축 커브-스프레드 차트 — "두 지표 차이" 모드 전용 ──
-// 주의: 이 프로젝트에서 이축(dual-axis)은 이 차트 하나만 허용한다.
-// 좌축(금리 레벨 %)과 우축(그 차이 bp)이 파생 관계라 예외적으로 쓰는 것 —
+// ── 이축 커브-스프레드 차트 — 금리 두 개와 그 차이 전용 ──
+// 주의: 이 프로젝트에서 이축(dual-axis)은 이 파생 관계에만 허용한다.
+// 좌축(금리 레벨 %)과 우축(그 차이 bp)이 직접 연결되므로 예외적으로 쓰는 것 —
 // 다른 차트에 이축을 확산시키지 말 것.
 // data: { a:{name, points:[{d,v}]}, b:{name, points}, spread:{name, points} }
 // 색 고정: A=--series-1(파랑), B=--series-2(녹색) — 표의 A/B 뱃지 색과 일치, 스프레드 영역=--series-6 wash
