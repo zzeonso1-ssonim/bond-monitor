@@ -137,6 +137,10 @@ $("#tabs").addEventListener("click", (e) => {
 function seriesOf(label) { return S.series.get(label) || []; }
 const yPoints = (arr) => arr.filter((p) => p.y != null).map((p) => ({ d: p.d, v: p.y }));
 const bpPoints = (arr) => arr.filter((p) => p.bp != null).map((p) => ({ d: p.d, v: p.bp }));
+const marketPoints = (symbol) => [...(S.market.get(symbol) || [])]
+  .reverse()
+  .filter((r) => r.value != null)
+  .map((r) => ({ d: r.trade_date, v: r.value }));
 
 // 두 라벨의 수익률차 시계열 ×100 (bp) — 교집합 날짜만
 function diffPoints(aLabel, bLabel) {
@@ -146,6 +150,14 @@ function diffPoints(aLabel, bLabel) {
     if (p.y != null && b.has(p.d)) out.push({ d: p.d, v: (p.y - b.get(p.d)) * 100 });
   }
   return out;
+}
+
+// 두 시장금리 심볼의 차이 ×100 (bp) — 교집합 날짜만
+function marketDiffPoints(aSymbol, bSymbol) {
+  const b = new Map(marketPoints(bSymbol).map((p) => [p.d, p.v]));
+  return marketPoints(aSymbol)
+    .filter((p) => b.has(p.d))
+    .map((p) => ({ d: p.d, v: (p.v - b.get(p.d)) * 100 }));
 }
 
 function addDaysISO(iso, days) {
@@ -227,6 +239,17 @@ function renderMonitor() {
   const root = $("#view-monitor");
   root.innerHTML = `
     <div class="tile-row" id="mon-tiles"></div>
+    <div class="card">
+      <div class="card-head">
+        <h2 id="ust-title">미국 국채 2Y · 10Y 금리</h2>
+        <span class="hint" id="ust-hint">최근 1년</span><span class="spacer"></span>
+        <div class="seg" id="ust-seg">
+          <button data-mode="yield" class="active">2Y · 10Y</button>
+          <button data-mode="curve">10Y−2Y</button>
+        </div>
+      </div>
+      <div id="ust-chart"></div>
+    </div>
     <details class="mkt-details">
       <summary>시장지표</summary>
       <div class="table-scroll">
@@ -287,6 +310,7 @@ function renderMonitor() {
 
   // 시장지표 접이식 표 — 전 심볼 종가·전일비·주간변동률
   buildMarketTable($("#mon-mkt-body", root));
+  renderUsTreasuryChart(root);
 
   // 지표 요약 표 — 그룹·순서·govt 판정 모두 CFG 기반
   const body = $("#mon-body", root);
@@ -357,6 +381,39 @@ function renderMonitor() {
   // 기본 선택: 첫 지표
   const first = CFG.monitorGroups.find((g) => g.labels?.length);
   if (first) selectMonitor(first.labels[0], !!first.govt);
+}
+
+function renderUsTreasuryChart(root) {
+  const p2 = marketPoints("UST2Y");
+  const p10 = marketPoints("UST10Y");
+  const d2 = p2[p2.length - 1]?.d ?? "—";
+  const d10 = p10[p10.length - 1]?.d ?? "—";
+  $("#ust-hint", root).textContent = `최근 1년 · 2Y ${d2} · 10Y ${d10}`;
+  let mode = "yield";
+
+  const draw = () => {
+    if (mode === "yield") {
+      $("#ust-title", root).textContent = "미국 국채 2Y · 10Y 금리";
+      lineChart($("#ust-chart", root), [
+        { name: "미국채 2Y", cssVar: "--series-1", points: p2 },
+        { name: "미국채 10Y", cssVar: "--series-6", points: p10 },
+      ], { unit: "%", digits: 3, showLegend: true });
+    } else {
+      $("#ust-title", root).textContent = "미국 국채 10Y−2Y 스프레드";
+      lineChart($("#ust-chart", root), [
+        { name: "10Y−2Y", cssVar: "--series-6", points: marketDiffPoints("UST10Y", "UST2Y") },
+      ], { unit: "bp", digits: 1, zeroLine: true, showLegend: true });
+    }
+  };
+
+  $("#ust-seg", root).addEventListener("click", (e) => {
+    const btn = e.target.closest("button");
+    if (!btn || btn.dataset.mode === mode) return;
+    mode = btn.dataset.mode;
+    for (const b of $("#ust-seg", root).querySelectorAll("button")) b.classList.toggle("active", b === btn);
+    draw();
+  });
+  draw();
 }
 
 // 시장지표 표 — 전일비는 절대변화(금리는 %p), 주간변동률은 (현재/1주전−1)×100 %, 금리만 주간도 %p 절대변화
@@ -474,7 +531,7 @@ function updateMonitorChart() {
   const arr = seriesOf(mon.label);
   const pts = lastYear(isY ? yPoints(arr) : bpPoints(arr));
   lineChart($("#mon-chart"), [{ name: mon.label, cssVar: SLOT_VARS[0], points: pts }],
-    isY ? { unit: "%", digits: 3 } : { unit: "bp", digits: 1 });
+    isY ? { unit: "%", digits: 3, showLegend: true } : { unit: "bp", digits: 1, showLegend: true });
 }
 
 /* ══════════════ 섹터 매트릭스 ══════════════ */
