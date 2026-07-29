@@ -78,6 +78,7 @@ export const REGIME_LABELS = [
 export const MARKET_SYMBOLS = [
   { symbol: "KOSPI", name: "KOSPI", digits: 2 },
   { symbol: "USDKRW", name: "원/달러", digits: 1 },
+  { symbol: "UST2Y", name: "미국채 2Y", digits: 3, unit: "%" },
   { symbol: "UST10Y", name: "미국채 10Y", digits: 3, unit: "%" },
 ];
 
