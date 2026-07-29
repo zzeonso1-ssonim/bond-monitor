@@ -46,11 +46,39 @@ async function downloadChartPng(svg, container) {
   const clone = svg.cloneNode(true);
   const viewBox = svg.viewBox.baseVal;
   const width = viewBox.width || 960;
-  const height = viewBox.height || 300;
+  const chartHeight = viewBox.height || 300;
   const scale = 2;
   const styles = getComputedStyle(document.documentElement);
+  const legendItems = [...container.querySelectorAll(".legend .lg")].map((item) => {
+    const key = item.querySelector(".lg-key, .lg-key-sq");
+    const square = key?.classList.contains("lg-key-sq") ?? false;
+    const keyStyles = key ? getComputedStyle(key) : null;
+    return {
+      name: item.textContent.trim(),
+      color: keyStyles ? (square ? keyStyles.backgroundColor : keyStyles.borderTopColor) : "",
+      square,
+    };
+  });
+  const legendRows = [];
+  if (legendItems.length) {
+    let row = [], used = 0;
+    for (const item of legendItems) {
+      const itemWidth = Math.max(80, item.name.length * 8 + 38);
+      if (row.length && used + itemWidth > width - 32) {
+        legendRows.push(row);
+        row = [];
+        used = 0;
+      }
+      row.push({ ...item, width: itemWidth });
+      used += itemWidth;
+    }
+    if (row.length) legendRows.push(row);
+  }
+  const legendHeight = legendRows.length ? 18 + legendRows.length * 24 : 0;
+  const height = chartHeight + legendHeight;
 
   clone.setAttribute("xmlns", NS);
+  clone.setAttribute("viewBox", `0 0 ${width} ${height}`);
   clone.setAttribute("width", width);
   clone.setAttribute("height", height);
   for (const name of CHART_CSS_VARS) {
@@ -63,6 +91,36 @@ async function downloadChartPng(svg, container) {
     fill: styles.getPropertyValue("--surface-1").trim() || "#ffffff",
   });
   clone.insertBefore(bg, clone.firstChild);
+
+  if (legendRows.length) {
+    const legend = el("g", { transform: `translate(18 ${chartHeight + 15})` });
+    legendRows.forEach((row, rowIndex) => {
+      let x = 0;
+      for (const item of row) {
+        if (item.square) {
+          legend.appendChild(el("rect", {
+            x, y: rowIndex * 24 - 5, width: 11, height: 11, rx: 2,
+            fill: item.color || styles.getPropertyValue("--text-secondary").trim(),
+          }));
+        } else {
+          legend.appendChild(el("line", {
+            x1: x, x2: x + 18, y1: rowIndex * 24, y2: rowIndex * 24,
+            stroke: item.color || styles.getPropertyValue("--text-secondary").trim(),
+            "stroke-width": 3, "stroke-linecap": "round",
+          }));
+        }
+        const label = el("text", {
+          x: x + 25, y: rowIndex * 24 + 4,
+          fill: styles.getPropertyValue("--text-secondary").trim() || "#475569",
+          "font-size": 12.5,
+        });
+        label.textContent = item.name;
+        legend.appendChild(label);
+        x += item.width;
+      }
+    });
+    clone.appendChild(legend);
+  }
 
   const blob = new Blob([new XMLSerializer().serializeToString(clone)], {
     type: "image/svg+xml;charset=utf-8",
@@ -285,8 +343,8 @@ export function lineChart(container, series, opts = {}) {
   svg.addEventListener("pointermove", onMove);
   svg.addEventListener("pointerleave", onLeave);
 
-  // 범례 (시리즈 ≥ 2일 때만 — 단일 시리즈는 제목이 이름을 대신)
-  if (live.length > 1) {
+  // 범례 (기본은 다중 시리즈, 필요한 차트는 단일 시리즈도 강제 표시)
+  if (live.length > 1 || opts.showLegend) {
     const lg = document.createElement("div");
     lg.className = "legend";
     for (const s of live) {
