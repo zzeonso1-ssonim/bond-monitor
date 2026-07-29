@@ -1262,7 +1262,8 @@ function renderFlows() {
     <p class="section-sub" id="fl-sub"></p>
     <p class="hint">KOFIA 채권정보센터 투자자별 거래현황(장외) · 거래대금 순매수 기준 · 단위 억원</p>
     <div class="tile-row" id="fl-tiles"></div>
-    <div class="section-title">투자자 × 채권종류 순매수</div>
+    <div class="section-title">투자자 × 채권종류 일간 순매수</div>
+    <p class="hint" id="fl-matrix-sub">최신 기준일 하루(1영업일) · 단위 억원</p>
     <div class="table-scroll" id="fl-matrix"></div>
     <div class="card">
       <div class="card-head">
@@ -1301,6 +1302,7 @@ function renderFlows() {
   const dates = distinctDates(net);
   const latest = dates[dates.length - 1];
   $("#fl-sub", root).textContent = `기준일 ${latest}`;
+  $("#fl-matrix-sub", root).textContent = `기준일 ${latest} 하루(1영업일) · 단위 억원`;
   const todays = net.filter((r) => r.trade_date === latest);
   const byClassToday = new Map(todays.map((r) => [r.bond_class, r]));
 
@@ -1337,7 +1339,7 @@ function renderFlows() {
     tiles.appendChild(tile);
   }
 
-  // 매트릭스 표: 행=투자자(+전체), 열=채권종류 — 당일 순매수(억원)
+  // 매트릭스 표: 행=투자자(+전체), 열=채권종류 — 기준일 하루(1영업일) 순매수(억원)
   const table = document.createElement("table");
   table.className = "data";
   const thead = document.createElement("thead");
