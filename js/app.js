@@ -1196,6 +1196,76 @@ function intDeltaSpan(v) {
   return sp;
 }
 
+const LIQUIDITY_DEFS = [
+  {
+    symbol: "FUND_AUM",
+    name: "펀드 수탁고",
+    frequency: "월말",
+    source: "금융투자협회 FreeSIS · 설정원본",
+    url: "https://freesis.kofia.or.kr/stat/FreeSIS.do?parentDivId=MSIS40100000000000&serviceId=STATFND0100100130",
+    cssVar: "--series-1",
+  },
+  {
+    symbol: "MMF_AUM",
+    name: "MMF 수탁고",
+    frequency: "일별",
+    source: "금융투자협회 FreeSIS · 설정원본",
+    url: "https://freesis.kofia.or.kr/stat/FreeSIS.do?parentDivId=MSIS40300000000000&serviceId=STATFND0400000050",
+    cssVar: "--series-2",
+  },
+  {
+    symbol: "FOREIGN_BOND_BAL",
+    name: "외국인 장외채권잔고",
+    frequency: "월말",
+    source: "금융감독원 · 금투협 장외채권시장 동향",
+    url: "https://www.kofia.or.kr/brd/m_211/list.do?srchTp=0&srchWord=%EC%9E%A5%EC%99%B8%EC%B1%84%EA%B6%8C%EC%8B%9C%EC%9E%A5%20%EB%8F%99%ED%96%A5",
+    cssVar: "--series-6",
+  },
+];
+
+function renderLiquidity(root) {
+  const seg = $("#liq-seg", root);
+  for (const def of LIQUIDITY_DEFS) {
+    const button = document.createElement("button");
+    button.dataset.symbol = def.symbol;
+    button.textContent = def.name;
+    if (def === LIQUIDITY_DEFS[0]) button.className = "active";
+    seg.appendChild(button);
+  }
+
+  const draw = (symbol) => {
+    const def = LIQUIDITY_DEFS.find((item) => item.symbol === symbol) || LIQUIDITY_DEFS[0];
+    const points = marketPoints(def.symbol);
+    const last = points[points.length - 1] || null;
+    const prev = points.length > 1 ? points[points.length - 2] : null;
+    $("#liq-title", root).textContent = `${def.name} 추이`;
+    $("#liq-current", root).textContent = last ? `${last.v.toFixed(1)}조원` : "—";
+    $("#liq-current-label", root).textContent = last ? `최신 ${last.d}` : "최신";
+    const change = last && prev ? last.v - prev.v : null;
+    const changeEl = $("#liq-change", root);
+    changeEl.textContent = change == null ? "—" : `${fmtSigned(change, 1)}조원`;
+    changeEl.className = "t-value";
+    if (change > 0) changeEl.classList.add("delta-up");
+    else if (change < 0) changeEl.classList.add("delta-dn");
+    $("#liq-change-label", root).textContent =
+      `직전 ${def.frequency === "일별" ? "영업일" : "월말"} 대비`;
+    const source = $("#liq-source", root);
+    source.textContent = `${def.frequency} · ${def.source} · 원자료 ↗`;
+    source.href = def.url;
+    lineChart($("#liq-chart", root), [
+      { name: def.name, cssVar: def.cssVar, points },
+    ], { unit: "조원", digits: 1, showLegend: true });
+  };
+
+  seg.addEventListener("click", (event) => {
+    const button = event.target.closest("button");
+    if (!button) return;
+    for (const item of seg.querySelectorAll("button")) item.classList.toggle("active", item === button);
+    draw(button.dataset.symbol);
+  });
+  draw(LIQUIDITY_DEFS[0].symbol);
+}
+
 
 /* 수급동향 탭의 '선물 수급' 블록 — 국채선물 근월물 표 + 외국인 순매수(주간 타일·연초 누적 차트) */
 function renderFlowsFutures(root) {
@@ -1295,6 +1365,19 @@ function renderFlowsFutures(root) {
 function renderFlows() {
   const root = $("#view-flows");
   root.innerHTML = `
+    <div class="section-title">자금·보유잔고 추이</div>
+    <div class="card">
+      <div class="card-head">
+        <h2 id="liq-title">펀드 수탁고 추이</h2><span class="hint">조원</span><span class="spacer"></span>
+        <div class="seg wrap" id="liq-seg"></div>
+      </div>
+      <div class="tile-row">
+        <div class="tile"><div class="t-label" id="liq-current-label">최신</div><div class="t-value" id="liq-current">—</div></div>
+        <div class="tile"><div class="t-label" id="liq-change-label">직전 대비</div><div class="t-value" id="liq-change">—</div></div>
+      </div>
+      <div id="liq-chart"></div>
+      <p class="hint"><a id="liq-source" target="_blank" rel="noopener"></a></p>
+    </div>
     <div class="section-title">현물 수급 (장외 투자자별 거래)</div>
     <p class="section-sub" id="fl-sub"></p>
     <p class="hint">KOFIA 채권정보센터 투자자별 거래현황(장외) · 거래대금 순매수 기준 · 단위 억원</p>
@@ -1325,6 +1408,8 @@ function renderFlows() {
       <div class="card-head"><h2>연초 이후 누적 순매수</h2><span class="hint">계약</span></div>
       <div id="fl-frg-chart"></div>
     </div>`;
+
+  renderLiquidity(root);
 
   const net = S.flows.filter((r) => r.trade_type === "순매수");
   if (!net.length) {
