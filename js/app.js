@@ -1198,30 +1198,43 @@ function intDeltaSpan(v) {
 
 const LIQUIDITY_DEFS = [
   {
-    symbol: "FUND_AUM",
-    name: "펀드 수탁고",
-    frequency: "월말",
-    source: "금융투자협회 FreeSIS · 설정원본",
+    symbol: "FUND_STOCK_AUM",
+    name: "주식형",
     url: "https://freesis.kofia.or.kr/stat/FreeSIS.do?parentDivId=MSIS40100000000000&serviceId=STATFND0100100130",
     cssVar: "--series-1",
   },
   {
+    symbol: "FUND_BOND_AUM",
+    name: "채권형",
+    url: "https://freesis.kofia.or.kr/stat/FreeSIS.do?parentDivId=MSIS40100000000000&serviceId=STATFND0100100130",
+    cssVar: "--series-6",
+  },
+  {
     symbol: "MMF_AUM",
-    name: "MMF 수탁고",
-    frequency: "일별",
-    source: "금융투자협회 FreeSIS · 설정원본",
+    name: "MMF",
     url: "https://freesis.kofia.or.kr/stat/FreeSIS.do?parentDivId=MSIS40300000000000&serviceId=STATFND0400000050",
     cssVar: "--series-2",
   },
-  {
-    symbol: "FOREIGN_BOND_BAL",
-    name: "외국인 장외채권잔고",
-    frequency: "월말",
-    source: "금융감독원 · 금투협 장외채권시장 동향",
-    url: "https://www.kofia.or.kr/brd/m_211/list.do?srchTp=0&srchWord=%EC%9E%A5%EC%99%B8%EC%B1%84%EA%B6%8C%EC%8B%9C%EC%9E%A5%20%EB%8F%99%ED%96%A5",
-    cssVar: "--series-6",
-  },
 ];
+
+const FOREIGN_BALANCE_DEF = {
+  symbol: "FOREIGN_BOND_BAL",
+  name: "외국인 장외채권잔고",
+  url: "https://www.kofia.or.kr/brd/m_211/list.do?srchTp=0&srchWord=%EC%9E%A5%EC%99%B8%EC%B1%84%EA%B6%8C%EC%8B%9C%EC%9E%A5%20%EB%8F%99%ED%96%A5",
+  cssVar: "--series-3",
+};
+
+// 서로 다른 빈도의 펀드 시계열을 같은 월말 축으로 맞춘다.
+// 월별 시계열은 해당 월 관측치, 일별 MMF는 해당 월 마지막 관측치를 사용한다.
+function monthlyMarketPoints(symbol) {
+  const byMonth = new Map();
+  for (const point of marketPoints(symbol)) byMonth.set(point.d.slice(0, 7), point);
+  return [...byMonth.entries()].map(([ym, point]) => {
+    const [year, month] = ym.split("-").map(Number);
+    const day = new Date(Date.UTC(year, month, 0)).getUTCDate();
+    return { d: `${ym}-${String(day).padStart(2, "0")}`, v: point.v };
+  });
+}
 
 function renderLiquidity(root) {
   const seg = $("#liq-seg", root);
@@ -1229,41 +1242,106 @@ function renderLiquidity(root) {
     const button = document.createElement("button");
     button.dataset.symbol = def.symbol;
     button.textContent = def.name;
-    if (def === LIQUIDITY_DEFS[0]) button.className = "active";
+    button.className = "active";
+    button.setAttribute("aria-pressed", "true");
     seg.appendChild(button);
   }
 
-  const draw = (symbol) => {
-    const def = LIQUIDITY_DEFS.find((item) => item.symbol === symbol) || LIQUIDITY_DEFS[0];
-    const points = marketPoints(def.symbol);
-    const last = points[points.length - 1] || null;
-    const prev = points.length > 1 ? points[points.length - 2] : null;
-    $("#liq-title", root).textContent = `${def.name} 추이`;
-    $("#liq-current", root).textContent = last ? `${last.v.toFixed(1)}조원` : "—";
-    $("#liq-current-label", root).textContent = last ? `최신 ${last.d}` : "최신";
-    const change = last && prev ? last.v - prev.v : null;
-    const changeEl = $("#liq-change", root);
-    changeEl.textContent = change == null ? "—" : `${fmtSigned(change, 1)}조원`;
-    changeEl.className = "t-value";
-    if (change > 0) changeEl.classList.add("delta-up");
-    else if (change < 0) changeEl.classList.add("delta-dn");
-    $("#liq-change-label", root).textContent =
-      `직전 ${def.frequency === "일별" ? "영업일" : "월말"} 대비`;
-    const source = $("#liq-source", root);
-    source.textContent = `${def.frequency} · ${def.source} · 원자료 ↗`;
-    source.href = def.url;
-    lineChart($("#liq-chart", root), [
-      { name: def.name, cssVar: def.cssVar, points },
-    ], { unit: "조원", digits: 1, showLegend: true });
+  const draw = () => {
+    const active = new Set(
+      [...seg.querySelectorAll("button.active")].map((button) => button.dataset.symbol)
+    );
+    const selected = LIQUIDITY_DEFS.filter((def) => active.has(def.symbol));
+    const prepared = selected.map((def) => ({ ...def, points: monthlyMarketPoints(def.symbol) }));
+    $("#liq-title", root).textContent =
+      selected.length === 1 ? `${selected[0].name} 수탁고 추이` : "펀드 유형별 수탁고 비교";
+
+    const tiles = $("#liq-tiles", root);
+    tiles.textContent = "";
+    for (const item of prepared) {
+      const last = item.points[item.points.length - 1] || null;
+      const prev = item.points.length > 1 ? item.points[item.points.length - 2] : null;
+      const tile = document.createElement("div");
+      tile.className = "tile";
+      const label = document.createElement("div");
+      label.className = "t-label";
+      label.textContent = last ? `${item.name} · ${last.d.slice(0, 7)}` : item.name;
+      const value = document.createElement("div");
+      value.className = "t-value";
+      value.textContent = last ? last.v.toFixed(1) : "—";
+      const unit = document.createElement("span");
+      unit.className = "unit";
+      unit.textContent = "조원";
+      value.appendChild(unit);
+      const delta = document.createElement("div");
+      delta.className = "t-delta";
+      delta.append("전월 대비 ", deltaSpan(last && prev ? last.v - prev.v : null, 1), "조원");
+      tile.append(label, value, delta);
+      tiles.appendChild(tile);
+    }
+
+    lineChart($("#liq-chart", root), prepared
+      .filter((item) => item.points.length)
+      .map((item) => ({ name: item.name, cssVar: item.cssVar, points: item.points })),
+    { unit: "조원", digits: 1, showLegend: true });
+
+    const monthSet = new Set();
+    const valueMaps = new Map();
+    for (const item of prepared) {
+      valueMaps.set(item.symbol, new Map(item.points.map((point) => [point.d.slice(0, 7), point.v])));
+      for (const point of item.points) monthSet.add(point.d.slice(0, 7));
+    }
+    const months = [...monthSet].sort().reverse().slice(0, 12);
+    const head = $("#liq-table-head", root);
+    const body = $("#liq-table-body", root);
+    head.textContent = "";
+    body.textContent = "";
+    const headerRow = document.createElement("tr");
+    for (const label of ["월말", ...selected.map((def) => `${def.name}(조원)`)]) {
+      const th = document.createElement("th");
+      th.textContent = label;
+      headerRow.appendChild(th);
+    }
+    head.appendChild(headerRow);
+    for (const month of months) {
+      const tr = document.createElement("tr");
+      const dateCell = document.createElement("td");
+      dateCell.textContent = month;
+      tr.appendChild(dateCell);
+      for (const def of selected) tr.appendChild(numTd(valueMaps.get(def.symbol)?.get(month), { digits: 1 }));
+      body.appendChild(tr);
+    }
   };
 
   seg.addEventListener("click", (event) => {
     const button = event.target.closest("button");
     if (!button) return;
-    for (const item of seg.querySelectorAll("button")) item.classList.toggle("active", item === button);
-    draw(button.dataset.symbol);
+    const buttons = [...seg.querySelectorAll("button")];
+    if (button.classList.contains("active") && buttons.filter((item) => item.classList.contains("active")).length === 1) {
+      return;
+    }
+    button.classList.toggle("active");
+    button.setAttribute("aria-pressed", String(button.classList.contains("active")));
+    draw();
   });
-  draw(LIQUIDITY_DEFS[0].symbol);
+  draw();
+}
+
+function renderForeignBalance(root) {
+  const points = monthlyMarketPoints(FOREIGN_BALANCE_DEF.symbol);
+  const last = points[points.length - 1] || null;
+  const prev = points.length > 1 ? points[points.length - 2] : null;
+  $("#foreign-balance-current", root).textContent = last ? last.v.toFixed(1) : "—";
+  $("#foreign-balance-date", root).textContent = last ? `최신 ${last.d.slice(0, 7)}` : "최신";
+  const change = last && prev ? last.v - prev.v : null;
+  const changeEl = $("#foreign-balance-change", root);
+  changeEl.textContent = change == null ? "—" : `${fmtSigned(change, 1)}조원`;
+  changeEl.className = "t-value";
+  if (change > 0) changeEl.classList.add("delta-up");
+  else if (change < 0) changeEl.classList.add("delta-dn");
+  lineChart($("#foreign-balance-chart", root), [
+    { name: FOREIGN_BALANCE_DEF.name, cssVar: FOREIGN_BALANCE_DEF.cssVar, points },
+  ], { unit: "조원", digits: 1, showLegend: true });
 }
 
 
@@ -1271,13 +1349,18 @@ function renderLiquidity(root) {
 function renderFlowsFutures(root) {
   // 선물 수급 1) 국채선물 시세 — 최신 영업일, prod 별 근월물(거래량 최대). 주간변동은 같은 종목코드의 5영업일 전 종가 대비
   const futBody = $("#fl-fut", root);
+  const foreignSymbolByProduct = { KTB3: "KTB3F_FRG", KTB10: "KTB10F_FRG" };
+  const latestForeign = new Map();
+  for (const row of S.futFrg) latestForeign.set(row.symbol, row);
   if (!S.futures.length) {
-    hintRow(futBody, 7, "데이터 적재 중");
+    hintRow(futBody, 8, "데이터 적재 중");
   } else {
     const fDates = distinctDates(S.futures);
     const latest = fDates[fDates.length - 1];
     const wkDate = fDates.length > 5 ? fDates[fDates.length - 6] : null;
-    $("#fl-fut-sub", root).textContent = `기준일 ${latest} · 근월물(거래량 최대) 기준`;
+    const foreignDate = S.futFrg[S.futFrg.length - 1]?.trade_date || "—";
+    $("#fl-fut-sub", root).textContent =
+      `시세 기준일 ${latest} · 근월물(거래량 최대) · 외국인 순매수 기준일 ${foreignDate}`;
     const todays = S.futures.filter((r) => r.trade_date === latest);
     const wkRows = wkDate ? S.futures.filter((r) => r.trade_date === wkDate) : [];
     for (const prod of Object.keys(FUT_NAMES)) {
@@ -1302,9 +1385,13 @@ function renderFlowsFutures(root) {
       const vol = document.createElement("td");
       vol.textContent = intFmt(front.volume);
       tr.appendChild(vol);
+      const foreign = latestForeign.get(foreignSymbolByProduct[prod]) || null;
+      const foreignCell = foreign ? intTd(foreign.value) : dashTd();
+      if (foreign) foreignCell.title = `외국인 일간 순매수 · ${foreign.trade_date}`;
+      tr.appendChild(foreignCell);
       futBody.appendChild(tr);
     }
-    if (!futBody.children.length) hintRow(futBody, 7, "데이터 적재 중");
+    if (!futBody.children.length) hintRow(futBody, 8, "데이터 적재 중");
   }
 
   // 선물 수급 2) 외국인 순매수 — 일별(계약) 타일 + 연초 누적 라인차트
@@ -1368,15 +1455,35 @@ function renderFlows() {
     <div class="section-title">자금·보유잔고 추이</div>
     <div class="card">
       <div class="card-head">
-        <h2 id="liq-title">펀드 수탁고 추이</h2><span class="hint">조원</span><span class="spacer"></span>
+        <h2 id="liq-title">펀드 유형별 수탁고 비교</h2><span class="hint">조원</span><span class="spacer"></span>
         <div class="seg wrap" id="liq-seg"></div>
       </div>
-      <div class="tile-row">
-        <div class="tile"><div class="t-label" id="liq-current-label">최신</div><div class="t-value" id="liq-current">—</div></div>
-        <div class="tile"><div class="t-label" id="liq-change-label">직전 대비</div><div class="t-value" id="liq-change">—</div></div>
-      </div>
+      <p class="hint">주식형·채권형은 월말 설정원본, MMF는 일별 설정원본의 월 마지막 관측치 · 버튼을 눌러 단독 또는 중첩 비교</p>
+      <div class="tile-row" id="liq-tiles"></div>
       <div id="liq-chart"></div>
-      <p class="hint"><a id="liq-source" target="_blank" rel="noopener"></a></p>
+      <div class="section-title">월말 수탁고 표</div>
+      <p class="hint">최근 12개월 · 선택한 유형만 표시 · 단위 조원</p>
+      <div class="table-scroll"><table class="data">
+        <thead id="liq-table-head"></thead><tbody id="liq-table-body"></tbody>
+      </table></div>
+      <p class="hint">
+        <a href="${LIQUIDITY_DEFS[0].url}" target="_blank" rel="noopener">주식형·채권형 FreeSIS 원자료 ↗</a>
+        · <a href="${LIQUIDITY_DEFS[2].url}" target="_blank" rel="noopener">MMF FreeSIS 원자료 ↗</a>
+      </p>
+    </div>
+    <div class="card">
+      <div class="card-head"><h2>외국인 장외채권잔고 추이</h2><span class="hint">조원</span></div>
+      <div class="tile-row">
+        <div class="tile">
+          <div class="t-label" id="foreign-balance-date">최신</div>
+          <div class="t-value"><span id="foreign-balance-current">—</span><span class="unit">조원</span></div>
+        </div>
+        <div class="tile">
+          <div class="t-label">전월 대비</div><div class="t-value" id="foreign-balance-change">—</div>
+        </div>
+      </div>
+      <div id="foreign-balance-chart"></div>
+      <p class="hint"><a href="${FOREIGN_BALANCE_DEF.url}" target="_blank" rel="noopener">금융감독원·금투협 장외채권시장 동향 원자료 ↗</a></p>
     </div>
     <div class="section-title">현물 수급 (장외 투자자별 거래)</div>
     <p class="section-sub" id="fl-sub"></p>
@@ -1399,7 +1506,7 @@ function renderFlows() {
     <div class="section-title">선물 수급 (KRX 국채선물)</div>
     <p class="section-sub" id="fl-fut-sub">근월물(거래량 최대) 기준</p>
     <div class="table-scroll"><table class="data">
-      <thead><tr><th>상품</th><th>종목</th><th>종가</th><th>전일비</th><th>주간변동</th><th>미결제약정</th><th>거래량</th></tr></thead>
+      <thead><tr><th>상품</th><th>종목</th><th>종가</th><th>전일비</th><th>주간변동</th><th>미결제약정</th><th>거래량</th><th>외국인 순매수(계약)</th></tr></thead>
       <tbody id="fl-fut"></tbody></table></div>
     <div class="section-title">외국인 국채선물 순매수</div>
     <p class="section-sub" id="fl-frg-sub">KRX 파생 투자자별 거래실적 · 계약 수 기준</p>
@@ -1410,6 +1517,7 @@ function renderFlows() {
     </div>`;
 
   renderLiquidity(root);
+  renderForeignBalance(root);
 
   const net = S.flows.filter((r) => r.trade_type === "순매수");
   if (!net.length) {

@@ -45,14 +45,14 @@ export async function loadSpreadSeries() {
 
 // market_daily 최근 시세 → Map(symbol -> rows[날짜 내림차순])
 export async function loadMarket() {
-  // 일반 시장지표 15일, 미국 2Y·10Y 1년, 펀드·MMF·외국인 채권잔고 3년을 로드한다.
+  // 일반 시장지표 15일, 미국 2Y·10Y 1년, 펀드 유형·MMF·외국인 채권잔고 3년을 로드한다.
   const recentFrom = new Date(Date.now() - 15 * 86400 * 1000).toISOString().slice(0, 10);
   const treasuryFrom = new Date(Date.now() - 370 * 86400 * 1000).toISOString().slice(0, 10);
   const liquidityFrom = new Date(Date.now() - 3 * 366 * 86400 * 1000).toISOString().slice(0, 10);
   const [recent, treasuries, liquidity] = await Promise.all([
     fetchPaged(
       `market_daily?select=trade_date,symbol,value&trade_date=gte.${recentFrom}` +
-        "&symbol=not.in.(UST2Y,UST10Y,FUND_AUM,MMF_AUM,FOREIGN_BOND_BAL)&order=trade_date.desc"
+        "&symbol=not.in.(UST2Y,UST10Y,FUND_AUM,FUND_STOCK_AUM,FUND_BOND_AUM,MMF_AUM,FOREIGN_BOND_BAL)&order=trade_date.desc"
     ),
     fetchPaged(
       "market_daily?select=trade_date,symbol,value&symbol=in.(UST2Y,UST10Y)" +
@@ -60,7 +60,7 @@ export async function loadMarket() {
     ),
     fetchPaged(
       "market_daily?select=trade_date,symbol,value" +
-        "&symbol=in.(FUND_AUM,MMF_AUM,FOREIGN_BOND_BAL)" +
+        "&symbol=in.(FUND_AUM,FUND_STOCK_AUM,FUND_BOND_AUM,MMF_AUM,FOREIGN_BOND_BAL)" +
         `&trade_date=gte.${liquidityFrom}&order=trade_date.desc`
     ),
   ]);
