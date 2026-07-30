@@ -196,6 +196,15 @@ export function lineChart(container, series, opts = {}) {
   }
   addDownloadButton(wrap, svg, container);
 
+  if (unit) {
+    const unitLabel = el("text", {
+      x: M.l, y: 10, "text-anchor": "start",
+      "font-size": 11, fill: "var(--muted)",
+    });
+    unitLabel.textContent = `(${unit})`;
+    svg.appendChild(unitLabel);
+  }
+
   // 공통 날짜축(합집합, 오름차순)
   const dateSet = new Set();
   for (const s of live) for (const p of s.points) dateSet.add(p.d);
@@ -397,6 +406,13 @@ export function regimeRangeChart(container, rows, opts = {}) {
   container.appendChild(wrap);
   addDownloadButton(wrap, svg, container);
 
+  const unitLabel = el("text", {
+    x: W - M.r, y: 12, "text-anchor": "end",
+    "font-size": 11, fill: "var(--muted)",
+  });
+  unitLabel.textContent = `(${opts.unit || "bp"})`;
+  svg.appendChild(unitLabel);
+
   for (const t of niceTicks(lo, hi, 6)) {
     svg.appendChild(el("line", { x1: x(t), x2: x(t), y1: M.t - 4, y2: H - M.b, stroke: "var(--grid)", "stroke-width": 1 }));
     const lab = el("text", { x: x(t), y: M.t - 10, "text-anchor": "middle", "font-size": 11, fill: "var(--muted)" });
@@ -476,6 +492,18 @@ export function dualSpreadChart(container, data, opts = {}) {
     return;
   }
   addDownloadButton(wrap, svg, container);
+
+  const leftUnit = el("text", {
+    x: M.l, y: 10, "text-anchor": "start",
+    "font-size": 11, fill: "var(--muted)",
+  });
+  leftUnit.textContent = "좌축 (%)";
+  const rightUnit = el("text", {
+    x: W - M.r, y: 10, "text-anchor": "end",
+    "font-size": 11, fill: "var(--muted)",
+  });
+  rightUnit.textContent = "우축 (bp)";
+  svg.append(leftUnit, rightUnit);
 
   // 공통 날짜축 — 세 시리즈 합집합
   const dateSet = new Set();
@@ -702,6 +730,15 @@ export function barChart(container, categories, series, opts = {}) {
     return;
   }
   addDownloadButton(wrap, svg, container);
+
+  if (unit) {
+    const unitLabel = el("text", {
+      x: M.l, y: 10, "text-anchor": "start",
+      "font-size": 11, fill: "var(--muted)",
+    });
+    unitLabel.textContent = `(${unit})`;
+    svg.appendChild(unitLabel);
+  }
 
   const all = live.flatMap((s) => s.values).filter((v) => v != null);
   let lo = Math.min(0, ...all), hi = Math.max(0, ...all);
