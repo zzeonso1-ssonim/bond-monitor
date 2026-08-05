@@ -143,9 +143,13 @@ export const FLOW_CLASSES = ["합계", "국채", "통안증권", "지방채", "�
 // (기준금리 효력 시작일과 다를 수 있다 — 예: 2020-03-16 임시 금통위, 효력 3/17).
 // bond-spread-system/scripts/common.py 의 BOK_BASE_RATE 는 효력일 기준이라 목적이 다르다.
 // 출처: 한국은행 통화정책방향 결정회의 목록(bok.or.kr) — 수집 2026-08-05, 아래 MPC_MEETINGS_META 참조.
-// 검증 상태(2026-08-05 수집): 2017~2024년은 한은 공식 회의목록 페이지에서 회의일 직접 확인,
-//   금리변경 8건은 위키백과 기준금리 이력과 교차 대조 완료. 2025-07 이후 동결 회의 6건과
-//   2026-07-16 인상은 언론 보도(연속 동결 회차 역산 포함)로 확인 — 한은 개별 통방문 대조는 미완.
+// **2017년 이전은 연 12회(매월), 2017년부터 연 8회 체계**다 — 건수가 연 8건으로 보이면 누락이다.
+// 검증 상태(2026-08-05 수집):
+//   · 2010~2016 (84건, 연 12건씩): 한은 공식 회의목록에서 직접 확인. 금리변경 13건이 저장소
+//     BOK_BASE_RATE 와 전건 일치했고 개최일=효력일이었다. 동결 회의 금리는 직전 변경치 유지로 채움.
+//   · 2017~2024: 한은 공식 회의목록에서 직접 확인, 금리변경 8건은 위키백과 이력과 교차 대조.
+//   · 2025-07 이후 동결 6건과 2026-07-16 인상: 언론 보도(연속 동결 회차 역산)로 확인 —
+//     한은 개별 통방문 대조는 미완.
 // 2026-08-27 / 10-22 / 11-26 은 예정일이라 넣지 않았다(개최 후 추가).
 export const MPC_MEETINGS_META = {
   source: "한국은행 통화정책방향 결정회의 목록 (bok.or.kr) + 금리변경분 언론 교차확인",
@@ -154,6 +158,90 @@ export const MPC_MEETINGS_META = {
 };
 export const MPC_MEETINGS = [
   // { date: 회의 개최일, decision: 인상|인하|동결, rate: 결정 후 기준금리(%), type?: "임시" }
+  { date: "2010-01-08", decision: "동결", rate: 2.0 },
+  { date: "2010-02-11", decision: "동결", rate: 2.0 },
+  { date: "2010-03-11", decision: "동결", rate: 2.0 },
+  { date: "2010-04-09", decision: "동결", rate: 2.0 },
+  { date: "2010-05-12", decision: "동결", rate: 2.0 },
+  { date: "2010-06-10", decision: "동결", rate: 2.0 },
+  { date: "2010-07-09", decision: "인상", rate: 2.25 },
+  { date: "2010-08-12", decision: "동결", rate: 2.25 },
+  { date: "2010-09-09", decision: "동결", rate: 2.25 },
+  { date: "2010-10-14", decision: "동결", rate: 2.25 },
+  { date: "2010-11-16", decision: "인상", rate: 2.5 },
+  { date: "2010-12-09", decision: "동결", rate: 2.5 },
+  { date: "2011-01-13", decision: "인상", rate: 2.75 },
+  { date: "2011-02-11", decision: "동결", rate: 2.75 },
+  { date: "2011-03-10", decision: "인상", rate: 3.0 },
+  { date: "2011-04-12", decision: "동결", rate: 3.0 },
+  { date: "2011-05-13", decision: "동결", rate: 3.0 },
+  { date: "2011-06-10", decision: "인상", rate: 3.25 },
+  { date: "2011-07-14", decision: "동결", rate: 3.25 },
+  { date: "2011-08-11", decision: "동결", rate: 3.25 },
+  { date: "2011-09-08", decision: "동결", rate: 3.25 },
+  { date: "2011-10-13", decision: "동결", rate: 3.25 },
+  { date: "2011-11-11", decision: "동결", rate: 3.25 },
+  { date: "2011-12-08", decision: "동결", rate: 3.25 },
+  { date: "2012-01-13", decision: "동결", rate: 3.25 },
+  { date: "2012-02-09", decision: "동결", rate: 3.25 },
+  { date: "2012-03-08", decision: "동결", rate: 3.25 },
+  { date: "2012-04-13", decision: "동결", rate: 3.25 },
+  { date: "2012-05-10", decision: "동결", rate: 3.25 },
+  { date: "2012-06-08", decision: "동결", rate: 3.25 },
+  { date: "2012-07-12", decision: "인하", rate: 3.0 },
+  { date: "2012-08-09", decision: "동결", rate: 3.0 },
+  { date: "2012-09-13", decision: "동결", rate: 3.0 },
+  { date: "2012-10-11", decision: "인하", rate: 2.75 },
+  { date: "2012-11-09", decision: "동결", rate: 2.75 },
+  { date: "2012-12-13", decision: "동결", rate: 2.75 },
+  { date: "2013-01-11", decision: "동결", rate: 2.75 },
+  { date: "2013-02-14", decision: "동결", rate: 2.75 },
+  { date: "2013-03-14", decision: "동결", rate: 2.75 },
+  { date: "2013-04-11", decision: "동결", rate: 2.75 },
+  { date: "2013-05-09", decision: "인하", rate: 2.5 },
+  { date: "2013-06-13", decision: "동결", rate: 2.5 },
+  { date: "2013-07-11", decision: "동결", rate: 2.5 },
+  { date: "2013-08-08", decision: "동결", rate: 2.5 },
+  { date: "2013-09-12", decision: "동결", rate: 2.5 },
+  { date: "2013-10-10", decision: "동결", rate: 2.5 },
+  { date: "2013-11-14", decision: "동결", rate: 2.5 },
+  { date: "2013-12-12", decision: "동결", rate: 2.5 },
+  { date: "2014-01-09", decision: "동결", rate: 2.5 },
+  { date: "2014-02-13", decision: "동결", rate: 2.5 },
+  { date: "2014-03-13", decision: "동결", rate: 2.5 },
+  { date: "2014-04-10", decision: "동결", rate: 2.5 },
+  { date: "2014-05-09", decision: "동결", rate: 2.5 },
+  { date: "2014-06-12", decision: "동결", rate: 2.5 },
+  { date: "2014-07-10", decision: "동결", rate: 2.5 },
+  { date: "2014-08-14", decision: "인하", rate: 2.25 },
+  { date: "2014-09-12", decision: "동결", rate: 2.25 },
+  { date: "2014-10-15", decision: "인하", rate: 2.0 },
+  { date: "2014-11-13", decision: "동결", rate: 2.0 },
+  { date: "2014-12-11", decision: "동결", rate: 2.0 },
+  { date: "2015-01-15", decision: "동결", rate: 2.0 },
+  { date: "2015-02-17", decision: "동결", rate: 2.0 },
+  { date: "2015-03-12", decision: "인하", rate: 1.75 },
+  { date: "2015-04-09", decision: "동결", rate: 1.75 },
+  { date: "2015-05-15", decision: "동결", rate: 1.75 },
+  { date: "2015-06-11", decision: "인하", rate: 1.5 },
+  { date: "2015-07-09", decision: "동결", rate: 1.5 },
+  { date: "2015-08-13", decision: "동결", rate: 1.5 },
+  { date: "2015-09-11", decision: "동결", rate: 1.5 },
+  { date: "2015-10-15", decision: "동결", rate: 1.5 },
+  { date: "2015-11-12", decision: "동결", rate: 1.5 },
+  { date: "2015-12-10", decision: "동결", rate: 1.5 },
+  { date: "2016-01-14", decision: "동결", rate: 1.5 },
+  { date: "2016-02-16", decision: "동결", rate: 1.5 },
+  { date: "2016-03-10", decision: "동결", rate: 1.5 },
+  { date: "2016-04-19", decision: "동결", rate: 1.5 },
+  { date: "2016-05-13", decision: "동결", rate: 1.5 },
+  { date: "2016-06-09", decision: "인하", rate: 1.25 },
+  { date: "2016-07-14", decision: "동결", rate: 1.25 },
+  { date: "2016-08-11", decision: "동결", rate: 1.25 },
+  { date: "2016-09-09", decision: "동결", rate: 1.25 },
+  { date: "2016-10-13", decision: "동결", rate: 1.25 },
+  { date: "2016-11-11", decision: "동결", rate: 1.25 },
+  { date: "2016-12-15", decision: "동결", rate: 1.25 },
   { date: "2017-01-13", decision: "동결", rate: 1.25 },
   { date: "2017-02-23", decision: "동결", rate: 1.25 },
   { date: "2017-04-13", decision: "동결", rate: 1.25 },
@@ -240,3 +328,10 @@ export const MPC_MEETINGS = [
 // 같은 방향 정책변경이 이어지는 동안이 한 사이클, 반대 방향이 나오면 종료. 회의만 추가하면 국면이 따라온다.
 export const REGIME_FLOW_LEAD_MONTHS = 3;
 export const REGIME_FLOW_POLICIES = ["인상", "인하"];
+
+// 같은 방향이어도 정책변경 사이가 이 개월 수를 **초과**해 벌어지면 별개 사이클로 끊는다.
+// 12로 잡은 근거(2026-08-05 실측): 사이클 내부 공백이 가장 컸던 것이 인상기(17.11~18.11)의
+// 2017-11-30 → 2018-11-30 = 정확히 12개월이라 이건 유지해야 하고, 끊어야 할 구간은
+// 2013-05-09 → 2014-08-14 = 15개월이다. 두 값 사이에서 "12개월 초과"가 유일하게 둘 다 만족한다.
+// (이 값을 13 이상으로 올리면 15개월 구간이 다시 붙고, 12 미만으로 내리면 17~18 인상기가 쪼개진다.)
+export const REGIME_FLOW_GAP_MONTHS = 12;

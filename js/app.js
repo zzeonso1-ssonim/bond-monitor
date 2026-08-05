@@ -4,6 +4,7 @@ import {
   REGIME_LABELS, MARKET_SYMBOLS, MARKET_TABLE, SLOT_VARS,
   FLOW_INVESTORS, FLOW_CLASSES,
   MPC_MEETINGS, MPC_MEETINGS_META, REGIME_FLOW_LEAD_MONTHS, REGIME_FLOW_POLICIES,
+  REGIME_FLOW_GAP_MONTHS,
 } from "./config.js";
 import {
   loadSpreadSeries, loadMarket, loadRegimeStats, loadWebMeta,
@@ -1487,7 +1488,9 @@ function policyCycles() {
   for (const m of MPC_MEETINGS) {
     if (!REGIME_FLOW_POLICIES.includes(m.decision)) continue;
     const cur = out[out.length - 1];
-    if (cur && cur.policy === m.decision) cur.last = m.date;
+    // 방향이 같아도 직전 변경에서 너무 오래 벌어졌으면(장기 동결) 별개 사이클로 끊는다.
+    const stale = cur && addMonthsISO(cur.last, REGIME_FLOW_GAP_MONTHS) < m.date;
+    if (cur && cur.policy === m.decision && !stale) cur.last = m.date;
     else out.push({ policy: m.decision, first: m.date, last: m.date });
   }
   return out.map((c, i) => ({
