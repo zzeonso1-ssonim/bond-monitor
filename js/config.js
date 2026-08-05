@@ -137,3 +137,105 @@ export const FLOW_INVESTORS = [
 ];
 // 매트릭스 표 열 순서 (kofia_investor_flows.bond_class 값 그대로)
 export const FLOW_CLASSES = ["합계", "국채", "통안증권", "지방채", "특수채", "은행채", "기타금융채", "회사채", "ABS"];
+
+// ── 금융통화위원회 통화정책방향 결정회의 ────────────────────────────────
+// 국면별 외국인 선물 수급 차트의 세로줄·구간 분해에 쓴다. date 는 **회의 개최일**
+// (기준금리 효력 시작일과 다를 수 있다 — 예: 2020-03-16 임시 금통위, 효력 3/17).
+// bond-spread-system/scripts/common.py 의 BOK_BASE_RATE 는 효력일 기준이라 목적이 다르다.
+// 출처: 한국은행 통화정책방향 결정회의 목록(bok.or.kr) — 수집 2026-08-05, 아래 MPC_MEETINGS_META 참조.
+// 검증 상태(2026-08-05 수집): 2017~2024년은 한은 공식 회의목록 페이지에서 회의일 직접 확인,
+//   금리변경 8건은 위키백과 기준금리 이력과 교차 대조 완료. 2025-07 이후 동결 회의 6건과
+//   2026-07-16 인상은 언론 보도(연속 동결 회차 역산 포함)로 확인 — 한은 개별 통방문 대조는 미완.
+// 2026-08-27 / 10-22 / 11-26 은 예정일이라 넣지 않았다(개최 후 추가).
+export const MPC_MEETINGS_META = {
+  source: "한국은행 통화정책방향 결정회의 목록 (bok.or.kr) + 금리변경분 언론 교차확인",
+  as_of: "2026-08-05",
+  caveat: "2025-07 이후 동결 6건·2026-07-16 인상은 언론 확인분(한은 통방문 개별 대조 미완)",
+};
+export const MPC_MEETINGS = [
+  // { date: 회의 개최일, decision: 인상|인하|동결, rate: 결정 후 기준금리(%), type?: "임시" }
+  { date: "2017-01-13", decision: "동결", rate: 1.25 },
+  { date: "2017-02-23", decision: "동결", rate: 1.25 },
+  { date: "2017-04-13", decision: "동결", rate: 1.25 },
+  { date: "2017-05-25", decision: "동결", rate: 1.25 },
+  { date: "2017-07-13", decision: "동결", rate: 1.25 },
+  { date: "2017-08-31", decision: "동결", rate: 1.25 },
+  { date: "2017-10-19", decision: "동결", rate: 1.25 },
+  { date: "2017-11-30", decision: "인상", rate: 1.50 },
+  { date: "2018-01-18", decision: "동결", rate: 1.50 },
+  { date: "2018-02-27", decision: "동결", rate: 1.50 },
+  { date: "2018-04-12", decision: "동결", rate: 1.50 },
+  { date: "2018-05-24", decision: "동결", rate: 1.50 },
+  { date: "2018-07-12", decision: "동결", rate: 1.50 },
+  { date: "2018-08-31", decision: "동결", rate: 1.50 },
+  { date: "2018-10-18", decision: "동결", rate: 1.50 },
+  { date: "2018-11-30", decision: "인상", rate: 1.75 },
+  { date: "2019-01-24", decision: "동결", rate: 1.75 },
+  { date: "2019-02-28", decision: "동결", rate: 1.75 },
+  { date: "2019-04-18", decision: "동결", rate: 1.75 },
+  { date: "2019-05-31", decision: "동결", rate: 1.75 },
+  { date: "2019-07-18", decision: "인하", rate: 1.50 },
+  { date: "2019-08-30", decision: "동결", rate: 1.50 },
+  { date: "2019-10-16", decision: "인하", rate: 1.25 },
+  { date: "2019-11-29", decision: "동결", rate: 1.25 },
+  { date: "2020-01-17", decision: "동결", rate: 1.25 },
+  { date: "2020-02-27", decision: "동결", rate: 1.25 },
+  { date: "2020-03-16", decision: "인하", rate: 0.75, type: "임시" }, // 효력 3/17 — 여기는 회의 개최일 기준
+  { date: "2020-04-09", decision: "동결", rate: 0.75 },
+  { date: "2020-05-28", decision: "인하", rate: 0.50 },
+  { date: "2020-07-16", decision: "동결", rate: 0.50 },
+  { date: "2020-08-27", decision: "동결", rate: 0.50 },
+  { date: "2020-10-14", decision: "동결", rate: 0.50 },
+  { date: "2020-11-26", decision: "동결", rate: 0.50 },
+  { date: "2021-01-15", decision: "동결", rate: 0.50 },
+  { date: "2021-02-25", decision: "동결", rate: 0.50 },
+  { date: "2021-04-15", decision: "동결", rate: 0.50 },
+  { date: "2021-05-27", decision: "동결", rate: 0.50 },
+  { date: "2021-07-15", decision: "동결", rate: 0.50 },
+  { date: "2021-08-26", decision: "인상", rate: 0.75 },
+  { date: "2021-10-12", decision: "동결", rate: 0.75 },
+  { date: "2021-11-25", decision: "인상", rate: 1.00 },
+  { date: "2022-01-14", decision: "인상", rate: 1.25 },
+  { date: "2022-02-24", decision: "동결", rate: 1.25 },
+  { date: "2022-04-14", decision: "인상", rate: 1.50 },
+  { date: "2022-05-26", decision: "인상", rate: 1.75 },
+  { date: "2022-07-13", decision: "인상", rate: 2.25 },
+  { date: "2022-08-25", decision: "인상", rate: 2.50 },
+  { date: "2022-10-12", decision: "인상", rate: 3.00 },
+  { date: "2022-11-24", decision: "인상", rate: 3.25 },
+  { date: "2023-01-13", decision: "인상", rate: 3.50 },
+  { date: "2023-02-23", decision: "동결", rate: 3.50 },
+  { date: "2023-04-11", decision: "동결", rate: 3.50 },
+  { date: "2023-05-25", decision: "동결", rate: 3.50 },
+  { date: "2023-07-13", decision: "동결", rate: 3.50 },
+  { date: "2023-08-24", decision: "동결", rate: 3.50 },
+  { date: "2023-10-19", decision: "동결", rate: 3.50 },
+  { date: "2023-11-30", decision: "동결", rate: 3.50 },
+  { date: "2024-01-11", decision: "동결", rate: 3.50 },
+  { date: "2024-02-22", decision: "동결", rate: 3.50 },
+  { date: "2024-04-12", decision: "동결", rate: 3.50 },
+  { date: "2024-05-23", decision: "동결", rate: 3.50 },
+  { date: "2024-07-11", decision: "동결", rate: 3.50 },
+  { date: "2024-08-22", decision: "동결", rate: 3.50 },
+  { date: "2024-10-11", decision: "인하", rate: 3.25 },
+  { date: "2024-11-28", decision: "인하", rate: 3.00 },
+  { date: "2025-01-16", decision: "동결", rate: 3.00 },
+  { date: "2025-02-25", decision: "인하", rate: 2.75 },
+  { date: "2025-04-17", decision: "동결", rate: 2.75 },
+  { date: "2025-05-29", decision: "인하", rate: 2.50 },
+  { date: "2025-07-10", decision: "동결", rate: 2.50 },
+  { date: "2025-08-28", decision: "동결", rate: 2.50 },
+  { date: "2025-10-23", decision: "동결", rate: 2.50 },
+  { date: "2025-11-27", decision: "동결", rate: 2.50 },
+  { date: "2026-01-15", decision: "동결", rate: 2.50 },
+  { date: "2026-02-26", decision: "동결", rate: 2.50 },
+  { date: "2026-04-10", decision: "동결", rate: 2.50 },
+  { date: "2026-05-28", decision: "동결", rate: 2.50 },
+  { date: "2026-07-16", decision: "인상", rate: 2.75 },
+];
+
+// 국면별 누적순매수 분석 대상 — 정책 방향이 바뀐 국면만(동결기 제외).
+// 구간은 "첫 정책변경 회의의 LEAD_MONTHS 개월 전 ~ 마지막 정책변경 회의"로 잡는다.
+// 국면 목록 자체는 하드코딩하지 않고 bond_regime_stats(era)에서 받아온다 — api.loadRegimes.
+export const REGIME_FLOW_LEAD_MONTHS = 3;
+export const REGIME_FLOW_POLICIES = ["인상", "인하"];

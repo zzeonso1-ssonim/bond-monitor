@@ -196,15 +196,6 @@ export function lineChart(container, series, opts = {}) {
   }
   addDownloadButton(wrap, svg, container);
 
-  if (unit) {
-    const unitLabel = el("text", {
-      x: M.l, y: 10, "text-anchor": "start",
-      "font-size": 11, fill: "var(--muted)",
-    });
-    unitLabel.textContent = `(${unit})`;
-    svg.appendChild(unitLabel);
-  }
-
   // 공통 날짜축(합집합, 오름차순)
   const dateSet = new Set();
   for (const s of live) for (const p of s.points) dateSet.add(p.d);
@@ -221,11 +212,24 @@ export function lineChart(container, series, opts = {}) {
   vLo -= pad; vHi += pad;
   if (opts.zeroLine && vLo > 0) vLo = 0;
 
+  // 눈금 라벨 폭에 맞춰 왼쪽 여백 확보 — 계약 수처럼 자릿수가 큰 값은 기본 46px 에서 잘린다
+  const ticks = niceTicks(vLo, vHi, 5);
+  const tickText = ticks.map((t) => t.toLocaleString(undefined, { maximumFractionDigits: 3 }));
+  M.l = Math.max(M.l, Math.max(...tickText.map((s) => s.length)) * 6.6 + 12);
+
   const x = (i) => M.l + (i / Math.max(dates.length - 1, 1)) * (W - M.l - M.r);
   const y = (v) => H - M.b - ((v - vLo) / (vHi - vLo)) * (H - M.t - M.b);
 
+  if (unit) {
+    const unitLabel = el("text", {
+      x: M.l, y: 10, "text-anchor": "start",
+      "font-size": 11, fill: "var(--muted)",
+    });
+    unitLabel.textContent = `(${unit})`;
+    svg.appendChild(unitLabel);
+  }
+
   // 그리드 + y축 눈금
-  const ticks = niceTicks(vLo, vHi, 5);
   for (const t of ticks) {
     svg.appendChild(el("line", { x1: M.l, x2: W - M.r, y1: y(t), y2: y(t), stroke: "var(--grid)", "stroke-width": 1 }));
     const lab = el("text", { x: M.l - 8, y: y(t) + 4, "text-anchor": "end", "font-size": 11, fill: "var(--muted)" });
@@ -252,6 +256,38 @@ export function lineChart(container, series, opts = {}) {
     svg.appendChild(lab);
   }
   svg.appendChild(el("line", { x1: M.l, x2: W - M.r, y1: H - M.b, y2: H - M.b, stroke: "var(--baseline)", "stroke-width": 1 }));
+
+  // 이벤트 세로줄 — opts.vlines: [{d, label, emphasis}] (금통위 개최일 등).
+  // d 가 날짜축에 없으면(휴장일·구간 밖) 가장 가까운 다음 영업일 위치에 세운다.
+  const vlines = (opts.vlines || [])
+    .map((v) => {
+      let i = idx.get(v.d);
+      if (i == null) {
+        i = dates.findIndex((d) => d >= v.d);
+        if (i < 0) return null;              // 구간 종료 이후면 표시하지 않음
+      }
+      return { ...v, i };
+    })
+    .filter(Boolean);
+  for (const v of vlines) {
+    svg.appendChild(el("line", {
+      x1: x(v.i), x2: x(v.i), y1: M.t, y2: H - M.b,
+      stroke: v.emphasis ? "var(--series-4)" : "var(--grid)",
+      "stroke-width": v.emphasis ? 1.5 : 1,
+      "stroke-dasharray": v.emphasis ? "none" : "3 3",
+    }));
+    if (v.label) {
+      // 라벨은 x축 바로 위에 둔다 — 상단은 다운로드 버튼과 겹친다.
+      // 구간의 마지막 회의는 세로줄이 오른쪽 끝에 붙으므로 그때만 안쪽(왼쪽)으로 뒤집는다.
+      const flip = x(v.i) > W - M.r - 40;
+      const lab = el("text", {
+        x: x(v.i) + (flip ? -3 : 3), y: H - M.b - 5, "text-anchor": flip ? "end" : "start",
+        "font-size": 9, fill: "var(--muted)",
+      });
+      lab.textContent = v.label;
+      svg.appendChild(lab);
+    }
+  }
 
   // 시리즈 패스 (+ 마지막 값 마커: 서페이스 링 2px)
   live.forEach((s, si) => {
@@ -323,7 +359,8 @@ export function lineChart(container, series, opts = {}) {
     cross.setAttribute("x1", x(i));
     cross.setAttribute("x2", x(i));
     cross.setAttribute("visibility", "visible");
-    tipDate.textContent = fmtDateFull(dates[i]);
+    const hit = vlines.find((v) => v.i === i);
+    tipDate.textContent = fmtDateFull(dates[i]) + (hit?.tooltip ? ` · ${hit.tooltip}` : "");
     refreshKeyColors();
     live.forEach((s, si) => {
       const v = byDate[si][i];

@@ -3,11 +3,13 @@ import {
   MONITOR_GROUPS, MATRIX_GROUPS, XCURVE_DEFS, RV_DEFS,
   REGIME_LABELS, MARKET_SYMBOLS, MARKET_TABLE, SLOT_VARS,
   FLOW_INVESTORS, FLOW_CLASSES,
+  MPC_MEETINGS, MPC_MEETINGS_META, REGIME_FLOW_LEAD_MONTHS, REGIME_FLOW_POLICIES,
 } from "./config.js";
 import {
   loadSpreadSeries, loadMarket, loadRegimeStats, loadWebMeta,
   loadKrxFutures, loadDartOfferings, loadDartDetails,
-  loadInvestorFlows, loadFuturesForeign, loadIssueStats, loadIssueMonthly,
+  loadInvestorFlows, loadFuturesForeign, loadFuturesForeignRange, loadRegimes,
+  loadIssueStats, loadIssueMonthly,
 } from "./api.js";
 import { lineChart, regimeRangeChart, dualSpreadChart, barChart } from "./charts.js";
 
@@ -18,6 +20,8 @@ const S = {
   series: new Map(), market: new Map(),
   stats: { regime: new Map(), rv: new Map(), xcurve: new Map() },
   futures: [], dart: [], dartDetails: [], flows: [], futFrg: [], issue: [], issueMonthly: [],
+  regimes: [],                 // 국면 정의(era) — 국면별 선물 수급 구간 계산용
+  regimeFrg: new Map(),        // 국면 bucket → 그 구간 외국인 선물 순매수 행 (lazy 캐시)
   asof: "",
 };
 
@@ -1438,7 +1442,21 @@ function renderFlowsFutures(root) {
     }
     if (hasAny) {
       const latest = S.futFrg[S.futFrg.length - 1]?.trade_date;
-      $("#fl-frg-sub", root).textContent = `KRX 파생 투자자별 거래실적 · 계약 수 기준 · 기준일 ${latest}`;
+      // 이 두 심볼만 KRX 로그인 화면에서 와서 서버 자동수집이 안 된다(북마클릿 수동 갱신).
+      // 조용히 낡는 것이 제일 위험하므로, 시장 데이터 최신일과 비교해 지연 영업일을 드러낸다.
+      // 기준은 KOSPI 거래일 — 같은 국내 영업일 달력이면서 자동 수집되는 계열.
+      const bizDays = (S.market.get("KOSPI") || []).map((r) => r.trade_date);
+      const lag = latest ? bizDays.filter((d) => d > latest).length : null;
+      const sub = $("#fl-frg-sub", root);
+      sub.textContent = `KRX 파생 투자자별 거래실적 · 계약 수 기준 · 기준일 ${latest}`;
+      if (lag) {
+        const warn = document.createElement("span");
+        warn.className = "stale-warn";
+        warn.textContent =
+          ` · ${lag}영업일 지연 (KRX 로그인이 필요해 자동수집 불가 — ` +
+          `bond-spread-system/tools 의 북마클릿·백필 스크립트로 갱신)`;
+        sub.appendChild(warn);
+      }
       lineChart($("#fl-frg-chart", root), chartSeries, { unit: "계약", digits: 0, zeroLine: true });
     } else {
       const p = document.createElement("p");
@@ -1447,6 +1465,185 @@ function renderFlowsFutures(root) {
       tiles.appendChild(p);
     }
   }
+}
+
+/* ══ 국면별 외국인 국채선물 누적 순매수 ══
+   구간 = 그 국면의 첫 정책변경 금통위 3개월 전 ~ 마지막 정책변경 금통위.
+   누적은 구간 시작에서 0으로 리베이스한다 — 그래야 국면끼리 크기를 비교할 수 있다.
+   국면 목록은 bond_regime_stats(era), 회의일은 config.MPC_MEETINGS 가 단일 소스. */
+const FRG_DEFS = [
+  { sym: "KTB3F_FRG", name: "3년 국채선물", cssVar: "--series-1" },
+  { sym: "KTB10F_FRG", name: "10년 국채선물", cssVar: "--series-6" },
+];
+
+// 국면 → 분석 구간. 그 국면 안에서 정책방향과 같은 결정을 한 회의의 처음·마지막으로 잡는다.
+// 회의 목록이 비었거나 국면 안에 해당 결정이 없으면 null(화면에서 제외).
+function cycleWindow(regime) {
+  const end = regime.regime_end || "9999-12-31";
+  const moves = MPC_MEETINGS.filter(
+    (m) => m.date >= regime.regime_start && m.date <= end && m.decision === regime.policy
+  );
+  if (!moves.length) return null;
+  const first = moves[0].date;
+  const last = moves[moves.length - 1].date;
+  const from = addMonthsISO(first, -REGIME_FLOW_LEAD_MONTHS);
+  return {
+    from, to: last, first, last,
+    meetings: MPC_MEETINGS.filter((m) => m.date >= from && m.date <= last),
+  };
+}
+
+// 화면에 띄울 국면 목록 (방향이 바뀐 국면만, 최신이 먼저)
+function flowCycles() {
+  return S.regimes
+    .filter((r) => REGIME_FLOW_POLICIES.includes(r.policy))
+    .map((r) => ({ regime: r, win: cycleWindow(r) }))
+    .filter((c) => c.win)
+    .reverse();
+}
+
+let regimeFrgPick = null; // 선택된 국면 bucket 명
+
+function renderRegimeFutures(root) {
+  const seg = $("#rf-seg", root);
+  const cycles = flowCycles();
+  if (!cycles.length) {
+    $("#rf-note", root).textContent =
+      S.regimes.length
+        ? "금통위 회의일 목록이 비어 있어 국면 구간을 계산할 수 없습니다 (config.js MPC_MEETINGS)."
+        : "국면 정의를 불러오지 못했습니다.";
+    return;
+  }
+  if (!cycles.some((c) => c.regime.bucket === regimeFrgPick)) regimeFrgPick = cycles[0].regime.bucket;
+
+  seg.textContent = "";
+  for (const c of cycles) {
+    const b = document.createElement("button");
+    b.textContent = c.regime.bucket;
+    b.dataset.bucket = c.regime.bucket;
+    b.classList.toggle("active", c.regime.bucket === regimeFrgPick);
+    seg.appendChild(b);
+  }
+  seg.onclick = (e) => {
+    const btn = e.target.closest("button");
+    if (!btn) return;
+    regimeFrgPick = btn.dataset.bucket;
+    for (const b of seg.querySelectorAll("button")) b.classList.toggle("active", b === btn);
+    drawRegimeFutures(root);
+  };
+  drawRegimeFutures(root);
+}
+
+async function drawRegimeFutures(root) {
+  const cyc = flowCycles().find((c) => c.regime.bucket === regimeFrgPick);
+  if (!cyc) return;
+  const { win, regime } = cyc;
+
+  $("#rf-note", root).textContent =
+    `${regime.bucket} · 첫 ${regime.policy} ${win.first} → 마지막 ${regime.policy} ${win.last} · ` +
+    `구간 ${win.from} ~ ${win.to} (첫 ${regime.policy} ${REGIME_FLOW_LEAD_MONTHS}개월 전부터) · ` +
+    `누적은 구간 시작 0 기준 · 단위 계약`;
+
+  const chartBox = $("#rf-chart", root);
+  const tbody = $("#rf-table", root);
+  chartBox.textContent = "불러오는 중…";
+  tbody.textContent = "";
+
+  // 구간 데이터 lazy 로드 (국면 단위 캐시 — 전 구간을 첫 화면에서 받으면 초기 로딩이 무거워진다)
+  let rows = S.regimeFrg.get(regime.bucket);
+  if (!rows) {
+    rows = await loadFuturesForeignRange(win.from, win.to);
+    S.regimeFrg.set(regime.bucket, rows);
+  }
+  if (regimeFrgPick !== regime.bucket) return; // 로딩 중 다른 국면으로 바뀌었으면 버린다
+
+  const bySym = new Map(FRG_DEFS.map((d) => [d.sym, []]));
+  for (const r of rows) bySym.get(r.symbol)?.push(r);
+
+  if (![...bySym.values()].some((a) => a.length)) {
+    chartBox.textContent = "";
+    const p = document.createElement("p");
+    p.className = "hint";
+    p.textContent =
+      `이 구간(${win.from} ~ ${win.to})의 외국인 선물 순매수 데이터가 없습니다. ` +
+      "bond-spread-system/tools/krx_foreign_futures_backfill.js 로 백필해야 표시됩니다.";
+    chartBox.appendChild(p);
+    return;
+  }
+
+  // 누적 시계열 (구간 시작 0 리베이스)
+  const series = [];
+  const cumBySym = new Map();
+  for (const def of FRG_DEFS) {
+    const arr = bySym.get(def.sym) || [];
+    if (!arr.length) continue;
+    let cum = 0;
+    const pts = arr.map((r) => ({ d: r.trade_date, v: (cum += r.value) }));
+    series.push({ name: def.name, cssVar: def.cssVar, points: pts });
+    cumBySym.set(def.sym, pts);
+  }
+
+  // 차트 — 금통위 세로줄(정책변경 회의는 강조)
+  const vlines = win.meetings.map((m) => ({
+    d: m.date,
+    label: m.decision === "동결" ? "" : m.decision,
+    emphasis: m.decision !== "동결",
+    tooltip: `금통위 ${m.decision}${m.rate != null ? ` ${m.rate.toFixed(2)}%` : ""}${m.type === "임시" ? " (임시)" : ""}`,
+  }));
+  chartBox.textContent = "";
+  lineChart(chartBox, series, { unit: "계약", digits: 0, zeroLine: false, vlines, showLegend: true });
+
+  // 표 — 금통위 구간별 분해. 각 행 = 직전 회의 다음날 ~ 그 회의일까지의 순매수 합과 구간 시작 이후 누적.
+  const sumBetween = (sym, a, b) =>
+    (bySym.get(sym) || []).reduce((s, r) => (r.trade_date >= a && r.trade_date <= b ? s + r.value : s), 0);
+  const cumAt = (sym, d) => {
+    const pts = cumBySym.get(sym);
+    if (!pts) return null;
+    const p = pointOnOrBefore(pts, d);
+    return p ? p.v : null;
+  };
+
+  const segs = [];
+  win.meetings.forEach((m, i) => {
+    if (i === 0) {
+      segs.push({ from: win.from, to: m.date, label: `사전 ${REGIME_FLOW_LEAD_MONTHS}개월 → ${m.date}`, m });
+    } else {
+      segs.push({ from: addDaysISO(win.meetings[i - 1].date, 1), to: m.date, label: `→ ${m.date}`, m });
+    }
+  });
+
+  for (const s of segs) {
+    const tr = document.createElement("tr");
+    const th = document.createElement("td");
+    th.textContent = s.label;
+    tr.appendChild(th);
+    const dec = document.createElement("td");
+    dec.textContent = s.m.decision + (s.m.type === "임시" ? " (임시)" : "");
+    if (s.m.decision === "인상") dec.className = "pos";
+    else if (s.m.decision === "인하") dec.className = "neg";
+    tr.appendChild(dec);
+    tr.appendChild(numTd(s.m.rate, { digits: 2 }));
+    for (const def of FRG_DEFS) {
+      tr.appendChild(bySym.get(def.sym)?.length ? intTd(sumBetween(def.sym, s.from, s.to)) : dashTd());
+      tr.appendChild(bySym.get(def.sym)?.length ? intTd(cumAt(def.sym, s.to)) : dashTd());
+    }
+    tbody.appendChild(tr);
+  }
+
+  // 합계 행 — 구간 전체
+  const tot = document.createElement("tr");
+  tot.className = "total";
+  const tl = document.createElement("td");
+  tl.textContent = `구간 전체 (${win.from} ~ ${win.to})`;
+  tot.appendChild(tl);
+  tot.appendChild(document.createElement("td"));
+  tot.appendChild(document.createElement("td"));
+  for (const def of FRG_DEFS) {
+    const pts = cumBySym.get(def.sym);
+    tot.appendChild(pts ? intTd(pts[pts.length - 1].v) : dashTd());
+    tot.appendChild(dashTd());
+  }
+  tbody.appendChild(tot);
 }
 
 function renderFlows() {
@@ -1514,6 +1711,25 @@ function renderFlows() {
     <div class="card">
       <div class="card-head"><h2>연초 이후 누적 순매수</h2><span class="hint">계약</span></div>
       <div id="fl-frg-chart"></div>
+    </div>
+    <div class="section-title">국면별 누적 순매수 (통화정책 사이클)</div>
+    <p class="section-sub" id="rf-note">국면을 선택하세요</p>
+    <div class="card">
+      <div class="card-head">
+        <h2>국면별 외국인 국채선물 누적 순매수</h2><span class="hint">계약</span><span class="spacer"></span>
+        <div class="seg wrap" id="rf-seg"></div>
+      </div>
+      <p class="hint">세로줄은 금융통화위원회 통화정책방향 결정회의 · 실선(라벨 표시)은 기준금리를 변경한 회의</p>
+      <div id="rf-chart"></div>
+      <div class="table-scroll"><table class="data">
+        <thead><tr>
+          <th>구간 (직전 금통위 다음날 ~ 해당 금통위일)</th><th>결정</th><th>기준금리(%)</th>
+          <th>3년 구간 순매수</th><th>3년 누적</th><th>10년 구간 순매수</th><th>10년 누적</th>
+        </tr></thead>
+        <tbody id="rf-table"></tbody>
+      </table></div>
+      <p class="hint">회의일 출처: ${MPC_MEETINGS_META.source} · 수집 ${MPC_MEETINGS_META.as_of}
+        · ${MPC_MEETINGS_META.caveat}</p>
     </div>`;
 
   renderLiquidity(root);
@@ -1526,6 +1742,7 @@ function renderFlows() {
     p.textContent = "데이터 적재 준비 중 (bond-spread-system sync_investor_flows 실행 후 표시됩니다)";
     $("#fl-matrix", root).appendChild(p);
     renderFlowsFutures(root);
+    renderRegimeFutures(root);
     return;
   }
 
@@ -1649,6 +1866,7 @@ function renderFlows() {
   drawChart();
 
   renderFlowsFutures(root);
+  renderRegimeFutures(root);
 }
 
 /* ══════════════ 부트스트랩 ══════════════ */
@@ -1667,6 +1885,7 @@ async function main() {
   const pIssueMonthly = loadIssueMonthly();
   const pDart = loadDartOfferings(90);
   const pDartDetails = loadDartDetails(7);
+  const pRegimes = loadRegimes();
 
   try {
     const [series, market, stats, meta] = await Promise.all([
@@ -1700,8 +1919,10 @@ async function main() {
   const fill = (promises, assign, render) =>
     Promise.all(promises).then((vals) => { assign(...vals); render(); }).catch(() => {});
 
-  fill([pFlows, pFutures, pFutFrg],
-    (flows, futures, futFrg) => { S.flows = flows; S.futures = futures; S.futFrg = futFrg; },
+  fill([pFlows, pFutures, pFutFrg, pRegimes],
+    (flows, futures, futFrg, regimes) => {
+      S.flows = flows; S.futures = futures; S.futFrg = futFrg; S.regimes = regimes;
+    },
     renderFlows);
   fill([pIssue, pIssueMonthly],
     (issue, issueMonthly) => { S.issue = issue; S.issueMonthly = issueMonthly; },

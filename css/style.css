@@ -236,6 +236,13 @@ table.data tr.group-row td {
   color: var(--text-secondary); font-weight: 700; font-size: 12px;
   padding-top: 12px; border-bottom-color: var(--baseline); text-align: left;
 }
+/* 데이터 정체 경고 — 수동 갱신 계열이 조용히 낡는 것을 막는다 */
+.stale-warn { color: var(--up); font-weight: 600; }
+
+/* 합계 행 — 국면별 누적 순매수 표의 구간 전체 */
+table.data tbody tr.total td {
+  font-weight: 700; border-top: 1px solid var(--baseline); border-bottom: none;
+}
 table.data tbody tr.sel-row { cursor: pointer; }
 table.data tbody tr.sel-row:hover { background: var(--accent-wash); }
 table.data tbody tr.sel-row.selected { background: var(--accent-wash); box-shadow: inset 2px 0 0 var(--accent); }
