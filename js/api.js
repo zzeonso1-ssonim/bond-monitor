@@ -184,22 +184,6 @@ export function loadFuturesForeignRange(from, to) {
   );
 }
 
-// 국면 정의(인상/인하/동결 구간) — bond_regime_stats 의 era 버킷에서 파생.
-// 국면 목록의 단일 소스는 bond-spread-system/scripts/common.py DEFAULT_REGIMES 이고,
-// 이 테이블이 그 값을 그대로 싣고 있다(라벨마다 같은 행이 반복되므로 하나만 골라 중복 제거).
-export async function loadRegimes() {
-  const rows = await fetchRecentSafe(
-    "bond_regime_stats?select=bucket,bucket_order,regime_start,regime_end,policy" +
-      "&bucket_type=eq.era&label=eq.국고채 3년&order=bucket_order.asc"
-  );
-  const seen = new Set();
-  return rows.filter((r) => {
-    if (seen.has(r.bucket)) return false;
-    seen.add(r.bucket);
-    return true;
-  });
-}
-
 // DART 채무증권 발행 공시 (rcept_dt 내림차순) — 테이블이 비어 있으면 빈 배열
 export function loadDartOfferings(days = 90) {
   return fetchRecentSafe(

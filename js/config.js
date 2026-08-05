@@ -236,6 +236,7 @@ export const MPC_MEETINGS = [
 
 // 국면별 누적순매수 분석 대상 — 정책 방향이 바뀐 국면만(동결기 제외).
 // 구간은 "첫 정책변경 회의의 LEAD_MONTHS 개월 전 ~ 마지막 정책변경 회의"로 잡는다.
-// 국면 목록 자체는 하드코딩하지 않고 bond_regime_stats(era)에서 받아온다 — api.loadRegimes.
+// 국면 목록은 하드코딩하지 않고 위 MPC_MEETINGS 에서 파생한다(app.js policyCycles) —
+// 같은 방향 정책변경이 이어지는 동안이 한 사이클, 반대 방향이 나오면 종료. 회의만 추가하면 국면이 따라온다.
 export const REGIME_FLOW_LEAD_MONTHS = 3;
 export const REGIME_FLOW_POLICIES = ["인상", "인하"];

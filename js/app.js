@@ -8,7 +8,7 @@ import {
 import {
   loadSpreadSeries, loadMarket, loadRegimeStats, loadWebMeta,
   loadKrxFutures, loadDartOfferings, loadDartDetails,
-  loadInvestorFlows, loadFuturesForeign, loadFuturesForeignRange, loadRegimes,
+  loadInvestorFlows, loadFuturesForeign, loadFuturesForeignRange,
   loadIssueStats, loadIssueMonthly,
 } from "./api.js";
 import { lineChart, regimeRangeChart, dualSpreadChart, barChart } from "./charts.js";
@@ -20,7 +20,6 @@ const S = {
   series: new Map(), market: new Map(),
   stats: { regime: new Map(), rv: new Map(), xcurve: new Map() },
   futures: [], dart: [], dartDetails: [], flows: [], futFrg: [], issue: [], issueMonthly: [],
-  regimes: [],                 // 국면 정의(era) — 국면별 선물 수급 구간 계산용
   regimeFrg: new Map(),        // 국면 bucket → 그 구간 외국인 선물 순매수 행 (lazy 캐시)
   asof: "",
 };
@@ -1476,30 +1475,40 @@ const FRG_DEFS = [
   { sym: "KTB10F_FRG", name: "10년 국채선물", cssVar: "--series-6" },
 ];
 
-// 국면 → 분석 구간. 그 국면 안에서 정책방향과 같은 결정을 한 회의의 처음·마지막으로 잡는다.
-// 회의 목록이 비었거나 국면 안에 해당 결정이 없으면 null(화면에서 제외).
-function cycleWindow(regime) {
-  const end = regime.regime_end || "9999-12-31";
-  const moves = MPC_MEETINGS.filter(
-    (m) => m.date >= regime.regime_start && m.date <= end && m.decision === regime.policy
-  );
-  if (!moves.length) return null;
-  const first = moves[0].date;
-  const last = moves[moves.length - 1].date;
-  const from = addMonthsISO(first, -REGIME_FLOW_LEAD_MONTHS);
-  return {
-    from, to: last, first, last,
-    meetings: MPC_MEETINGS.filter((m) => m.date >= from && m.date <= last),
-  };
+// 정책 사이클을 금통위 결정 이력에서 직접 파생한다. 같은 방향의 정책변경이 이어지는 동안이
+// 한 사이클이고, 반대 방향 변경이 나오면 거기서 끝난다. 마지막 사이클은 아직 반대 방향 변경이
+// 없으므로 진행 중으로 본다 — 새 인상·인하가 생기면 회의만 추가하면 국면이 따라 생긴다.
+// bond_regime_stats(era)를 쓰지 않는 이유: 그쪽은 회사 PC run_daily.py 산출물이라 갱신이 늦고,
+// 스프레드 통계용 버킷이라 동결기까지 포함해 이 화면의 목적과 경계가 다르다.
+const ymLabel = (iso) => `${iso.slice(2, 4)}.${+iso.slice(5, 7)}`;
+
+function policyCycles() {
+  const out = [];
+  for (const m of MPC_MEETINGS) {
+    if (!REGIME_FLOW_POLICIES.includes(m.decision)) continue;
+    const cur = out[out.length - 1];
+    if (cur && cur.policy === m.decision) cur.last = m.date;
+    else out.push({ policy: m.decision, first: m.date, last: m.date });
+  }
+  return out.map((c, i) => ({
+    ...c,
+    ongoing: i === out.length - 1,
+    bucket: `${c.policy}기(${ymLabel(c.first)}~${i === out.length - 1 ? "현재" : ymLabel(c.last)})`,
+  }));
 }
 
-// 화면에 띄울 국면 목록 (방향이 바뀐 국면만, 최신이 먼저)
+// 사이클 → 분석 구간. 첫 정책변경 회의의 LEAD_MONTHS 개월 전부터,
+// 끝난 사이클은 마지막 정책변경 회의까지, 진행 중이면 최신 데이터까지.
+function cycleWindow(cyc) {
+  const from = addMonthsISO(cyc.first, -REGIME_FLOW_LEAD_MONTHS);
+  const to = cyc.ongoing ? (S.asof || new Date().toISOString().slice(0, 10)) : cyc.last;
+  return { from, to, first: cyc.first, last: cyc.last, ongoing: cyc.ongoing,
+    meetings: MPC_MEETINGS.filter((m) => m.date >= from && m.date <= to) };
+}
+
+// 화면에 띄울 국면 목록 (최신이 먼저)
 function flowCycles() {
-  return S.regimes
-    .filter((r) => REGIME_FLOW_POLICIES.includes(r.policy))
-    .map((r) => ({ regime: r, win: cycleWindow(r) }))
-    .filter((c) => c.win)
-    .reverse();
+  return policyCycles().map((c) => ({ regime: c, win: cycleWindow(c) })).reverse();
 }
 
 let regimeFrgPick = null; // 선택된 국면 bucket 명
@@ -1509,9 +1518,7 @@ function renderRegimeFutures(root) {
   const cycles = flowCycles();
   if (!cycles.length) {
     $("#rf-note", root).textContent =
-      S.regimes.length
-        ? "금통위 회의일 목록이 비어 있어 국면 구간을 계산할 수 없습니다 (config.js MPC_MEETINGS)."
-        : "국면 정의를 불러오지 못했습니다.";
+      "금통위 회의일 목록이 비어 있어 국면 구간을 계산할 수 없습니다 (config.js MPC_MEETINGS).";
     return;
   }
   if (!cycles.some((c) => c.regime.bucket === regimeFrgPick)) regimeFrgPick = cycles[0].regime.bucket;
@@ -1540,8 +1547,9 @@ async function drawRegimeFutures(root) {
   const { win, regime } = cyc;
 
   $("#rf-note", root).textContent =
-    `${regime.bucket} · 첫 ${regime.policy} ${win.first} → 마지막 ${regime.policy} ${win.last} · ` +
-    `구간 ${win.from} ~ ${win.to} (첫 ${regime.policy} ${REGIME_FLOW_LEAD_MONTHS}개월 전부터) · ` +
+    `${regime.bucket} · 첫 ${regime.policy} ${win.first} → ` +
+    (win.ongoing ? `진행 중 (직전 ${regime.policy} ${win.last})` : `마지막 ${regime.policy} ${win.last}`) +
+    ` · 구간 ${win.from} ~ ${win.to} (첫 ${regime.policy} ${REGIME_FLOW_LEAD_MONTHS}개월 전부터) · ` +
     `누적은 구간 시작 0 기준 · 단위 계약`;
 
   const chartBox = $("#rf-chart", root);
@@ -1593,6 +1601,14 @@ async function drawRegimeFutures(root) {
   chartBox.textContent = "";
   lineChart(chartBox, series, { unit: "계약", digits: 0, zeroLine: false, vlines, showLegend: true });
 
+  const dataEndAll = rows[rows.length - 1]?.trade_date;
+  if (dataEndAll && dataEndAll < win.to) {
+    const p = document.createElement("p");
+    p.className = "hint";
+    p.innerHTML = `요청 구간은 ${win.to} 까지지만 데이터는 <span class="stale-warn">${dataEndAll}</span> 까지만 있습니다.`;
+    chartBox.appendChild(p);
+  }
+
   // 표 — 금통위 구간별 분해. 각 행 = 직전 회의 다음날 ~ 그 회의일까지의 순매수 합과 구간 시작 이후 누적.
   const sumBetween = (sym, a, b) =>
     (bySym.get(sym) || []).reduce((s, r) => (r.trade_date >= a && r.trade_date <= b ? s + r.value : s), 0);
@@ -1611,6 +1627,14 @@ async function drawRegimeFutures(root) {
       segs.push({ from: addDaysISO(win.meetings[i - 1].date, 1), to: m.date, label: `→ ${m.date}`, m });
     }
   });
+  // 진행 중 사이클은 마지막 회의 이후 구간이 남는다 — 그 몫을 따로 한 줄로 보여준다.
+  // 라벨에는 요청 구간 끝이 아니라 **실제 데이터가 있는 마지막 날**을 쓴다 — 이 계열은 수동 갱신이라
+  // 뒤처져 있을 수 있고, 없는 날까지 집계한 것처럼 보이면 안 된다.
+  const dataEnd = rows.length ? rows[rows.length - 1].trade_date : null;
+  const lastMtg = win.meetings[win.meetings.length - 1];
+  if (lastMtg && dataEnd && lastMtg.date < dataEnd) {
+    segs.push({ from: addDaysISO(lastMtg.date, 1), to: dataEnd, label: `→ ${dataEnd} (다음 금통위 전)`, m: {} });
+  }
 
   for (const s of segs) {
     const tr = document.createElement("tr");
@@ -1618,11 +1642,11 @@ async function drawRegimeFutures(root) {
     th.textContent = s.label;
     tr.appendChild(th);
     const dec = document.createElement("td");
-    dec.textContent = s.m.decision + (s.m.type === "임시" ? " (임시)" : "");
+    dec.textContent = s.m.decision ? s.m.decision + (s.m.type === "임시" ? " (임시)" : "") : "—";
     if (s.m.decision === "인상") dec.className = "pos";
     else if (s.m.decision === "인하") dec.className = "neg";
     tr.appendChild(dec);
-    tr.appendChild(numTd(s.m.rate, { digits: 2 }));
+    tr.appendChild(numTd(s.m.rate ?? null, { digits: 2 }));
     for (const def of FRG_DEFS) {
       tr.appendChild(bySym.get(def.sym)?.length ? intTd(sumBetween(def.sym, s.from, s.to)) : dashTd());
       tr.appendChild(bySym.get(def.sym)?.length ? intTd(cumAt(def.sym, s.to)) : dashTd());
@@ -1634,7 +1658,7 @@ async function drawRegimeFutures(root) {
   const tot = document.createElement("tr");
   tot.className = "total";
   const tl = document.createElement("td");
-  tl.textContent = `구간 전체 (${win.from} ~ ${win.to})`;
+  tl.textContent = `구간 전체 (${win.from} ~ ${dataEnd || win.to})`;
   tot.appendChild(tl);
   tot.appendChild(document.createElement("td"));
   tot.appendChild(document.createElement("td"));
@@ -1885,7 +1909,6 @@ async function main() {
   const pIssueMonthly = loadIssueMonthly();
   const pDart = loadDartOfferings(90);
   const pDartDetails = loadDartDetails(7);
-  const pRegimes = loadRegimes();
 
   try {
     const [series, market, stats, meta] = await Promise.all([
@@ -1919,10 +1942,8 @@ async function main() {
   const fill = (promises, assign, render) =>
     Promise.all(promises).then((vals) => { assign(...vals); render(); }).catch(() => {});
 
-  fill([pFlows, pFutures, pFutFrg, pRegimes],
-    (flows, futures, futFrg, regimes) => {
-      S.flows = flows; S.futures = futures; S.futFrg = futFrg; S.regimes = regimes;
-    },
+  fill([pFlows, pFutures, pFutFrg],
+    (flows, futures, futFrg) => { S.flows = flows; S.futures = futures; S.futFrg = futFrg; },
     renderFlows);
   fill([pIssue, pIssueMonthly],
     (issue, issueMonthly) => { S.issue = issue; S.issueMonthly = issueMonthly; },
