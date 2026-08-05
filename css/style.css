@@ -326,3 +326,6 @@ table.data td.mx-cell.selected { outline: 2px solid var(--series-1); outline-off
   /* 인터랙션 힌트 배지·커서 표시는 무의미 — 그대로 두되 호버 배경 제거 */
   table.data tbody tr.sel-row:hover { background: none; }
 }
+
+/* 데이터가 없는 구간 행 — 값이 0 인 것과 구분되게 흐리게 */
+table.data tbody td.muted-row { color: var(--muted); }

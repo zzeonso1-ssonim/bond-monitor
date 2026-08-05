@@ -1604,11 +1604,25 @@ async function drawRegimeFutures(root) {
   chartBox.textContent = "";
   lineChart(chartBox, series, { unit: "계약", digits: 0, zeroLine: false, vlines, showLegend: true });
 
+  // 데이터 범위가 요청 구간에 못 미치면 반드시 드러낸다. 특히 **앞쪽이 잘리면**
+  // 누적 0 기점이 국면 시작이 아니게 되어 국면끼리 비교가 성립하지 않는다
+  // (KRX 투자자별은 3년물 2010-09-06, 10년물 2010-10-25 이전이 아예 없다).
+  const dataStartAll = rows[0]?.trade_date;
   const dataEndAll = rows[rows.length - 1]?.trade_date;
+  const gaps = [];
+  if (dataStartAll && dataStartAll > win.from) {
+    const late = dataStartAll > win.first;   // 첫 정책변경일보다도 늦으면 국면 자체가 반쪽이다
+    gaps.push(`구간 시작은 ${win.from} 인데 데이터는 <span class="stale-warn">${dataStartAll}</span> 부터입니다` +
+      (late ? ` — 첫 ${regime.policy}(${win.first}) 이전이 통째로 없어 누적 기점이 국면 시작과 다릅니다`
+            : ` (사전 ${REGIME_FLOW_LEAD_MONTHS}개월이 일부 빕니다)`));
+  }
   if (dataEndAll && dataEndAll < win.to) {
+    gaps.push(`구간 끝은 ${win.to} 인데 데이터는 <span class="stale-warn">${dataEndAll}</span> 까지만 있습니다`);
+  }
+  if (gaps.length) {
     const p = document.createElement("p");
     p.className = "hint";
-    p.innerHTML = `요청 구간은 ${win.to} 까지지만 데이터는 <span class="stale-warn">${dataEndAll}</span> 까지만 있습니다.`;
+    p.innerHTML = `⚠ ${gaps.join(" · ")}`;
     chartBox.appendChild(p);
   }
 
@@ -1625,7 +1639,7 @@ async function drawRegimeFutures(root) {
   const segs = [];
   win.meetings.forEach((m, i) => {
     if (i === 0) {
-      segs.push({ from: win.from, to: m.date, label: `사전 ${REGIME_FLOW_LEAD_MONTHS}개월 → ${m.date}`, m });
+      segs.push({ from: win.from, to: m.date, m, label: `사전 ${REGIME_FLOW_LEAD_MONTHS}개월 → ${m.date}` });
     } else {
       segs.push({ from: addDaysISO(win.meetings[i - 1].date, 1), to: m.date, label: `→ ${m.date}`, m });
     }
@@ -1640,9 +1654,13 @@ async function drawRegimeFutures(root) {
   }
 
   for (const s of segs) {
+    // 데이터 시작 이전 구간은 0이 아니라 "—"로 둔다 — 0 은 "순매수 0"으로 읽혀 위험하다.
+    const noData = dataStartAll && s.to < dataStartAll;
+    const partial = dataStartAll && s.from < dataStartAll && s.to >= dataStartAll;
     const tr = document.createElement("tr");
     const th = document.createElement("td");
-    th.textContent = s.label;
+    th.textContent = s.label + (noData ? " · 데이터 없음" : partial ? ` · ${dataStartAll}부터` : "");
+    if (noData) th.className = "muted-row";
     tr.appendChild(th);
     const dec = document.createElement("td");
     dec.textContent = s.m.decision ? s.m.decision + (s.m.type === "임시" ? " (임시)" : "") : "—";
@@ -1651,8 +1669,9 @@ async function drawRegimeFutures(root) {
     tr.appendChild(dec);
     tr.appendChild(numTd(s.m.rate ?? null, { digits: 2 }));
     for (const def of FRG_DEFS) {
-      tr.appendChild(bySym.get(def.sym)?.length ? intTd(sumBetween(def.sym, s.from, s.to)) : dashTd());
-      tr.appendChild(bySym.get(def.sym)?.length ? intTd(cumAt(def.sym, s.to)) : dashTd());
+      const has = !noData && bySym.get(def.sym)?.length;
+      tr.appendChild(has ? intTd(sumBetween(def.sym, s.from, s.to)) : dashTd());
+      tr.appendChild(has ? intTd(cumAt(def.sym, s.to)) : dashTd());
     }
     tbody.appendChild(tr);
   }
@@ -1661,7 +1680,7 @@ async function drawRegimeFutures(root) {
   const tot = document.createElement("tr");
   tot.className = "total";
   const tl = document.createElement("td");
-  tl.textContent = `구간 전체 (${win.from} ~ ${dataEnd || win.to})`;
+  tl.textContent = `구간 전체 (${dataStartAll && dataStartAll > win.from ? dataStartAll : win.from} ~ ${dataEnd || win.to})`;
   tot.appendChild(tl);
   tot.appendChild(document.createElement("td"));
   tot.appendChild(document.createElement("td"));
