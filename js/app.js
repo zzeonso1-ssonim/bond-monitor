@@ -1652,24 +1652,29 @@ function renderFlows() {
 }
 
 /* ══════════════ 부트스트랩 ══════════════ */
+// 로딩을 두 단계로 나눈다. 예전에는 11개 호출을 Promise.all 로 묶어 가장 느린 하나가
+// 전 화면을 붙잡았다. 1단계는 첫 화면(일간 모니터링·매트릭스·심리지표·상대가치·국면)에
+// 필요한 것만 기다려 바로 그리고, 늦게 오는 탭 데이터는 도착하는 대로 그 탭만 다시 그린다.
+// 2단계 로더는 실패 시 빈 배열을 주므로(api.js fetchRecentSafe) 빈 상태로 먼저 그려도 안전하다.
+// 2단계 필드(futures·dart·dartDetails·flows·futFrg·issue·issueMonthly)를 새 화면에서 쓰려면
+// 그 화면의 렌더러를 아래 fill() 에 함께 물려야 한다 — 1단계 렌더에는 아직 비어 있다.
 async function main() {
+  // 2단계 요청도 지금 바로 띄운다 — 1단계 대기와 동시에 진행된다
+  const pFutures = loadKrxFutures(30);
+  const pFlows = loadInvestorFlows(200);
+  const pFutFrg = loadFuturesForeign();
+  const pIssue = loadIssueStats();
+  const pIssueMonthly = loadIssueMonthly();
+  const pDart = loadDartOfferings(90);
+  const pDartDetails = loadDartDetails(7);
+
   try {
-    const [series, market, stats, meta, futures, dart, dartDetails, flows, futFrg, issue, issueMonthly] = await Promise.all([
+    const [series, market, stats, meta] = await Promise.all([
       loadSpreadSeries(), loadMarket(), loadRegimeStats(), loadWebMeta(),
-      loadKrxFutures(30), loadDartOfferings(90),
-      loadDartDetails(7), loadInvestorFlows(200), loadFuturesForeign(), loadIssueStats(),
-      loadIssueMonthly(),
     ]);
     S.series = series;
     S.market = market;
     S.stats = stats;
-    S.futures = futures;
-    S.dart = dart;
-    S.dartDetails = dartDetails;
-    S.flows = flows;
-    S.futFrg = futFrg;
-    S.issue = issue;
-    S.issueMonthly = issueMonthly;
 
     // 기준일 — 스프레드 데이터 최신 일자 (없으면 시장지표 최신 일자)
     let asof = "";
@@ -1688,6 +1693,21 @@ async function main() {
     applyMeta(meta);
   } catch (err) {
     $("#loading").textContent = `데이터 로드 실패: ${err.message}`;
+    return;
   }
+
+  // 2단계 — 탭 단위로 데이터가 다 모이면 그 탭만 다시 렌더 (CFG 는 applyMeta 에서 이미 설정됨)
+  const fill = (promises, assign, render) =>
+    Promise.all(promises).then((vals) => { assign(...vals); render(); }).catch(() => {});
+
+  fill([pFlows, pFutures, pFutFrg],
+    (flows, futures, futFrg) => { S.flows = flows; S.futures = futures; S.futFrg = futFrg; },
+    renderFlows);
+  fill([pIssue, pIssueMonthly],
+    (issue, issueMonthly) => { S.issue = issue; S.issueMonthly = issueMonthly; },
+    renderIssue);
+  fill([pDart, pDartDetails],
+    (dart, dartDetails) => { S.dart = dart; S.dartDetails = dartDetails; },
+    renderOfferings);
 }
 main();

@@ -2,19 +2,55 @@
 import { SUPABASE_URL, SUPABASE_KEY } from "./config.js";
 
 const HEADERS = { apikey: SUPABASE_KEY, Authorization: `Bearer ${SUPABASE_KEY}` };
-const PAGE = 1000; // PostgREST 기본 max-rows 안전값
+// PostgREST max-rows 는 서버 고정이라 페이지를 키울 수 없다
+// (실측 2026-08-05: Range 0-49999 를 줘도 1000행만 온다) → 동시 요청으로만 줄인다.
+const PAGE = 1000;
+const CONCURRENCY = 8;
 
+const sinceISO = (days) => new Date(Date.now() - days * 86400 * 1000).toISOString().slice(0, 10);
+
+// 단일 페이지. wantCount 면 Content-Range 의 전체 건수(`0-999/278654`)도 함께 돌려준다.
+async function fetchRange(path, from, wantCount = false) {
+  const headers = { ...HEADERS, Range: `${from}-${from + PAGE - 1}` };
+  if (wantCount) headers.Prefer = "count=exact";
+  const res = await fetch(`${SUPABASE_URL}/rest/v1/${path}`, { headers });
+  if (!res.ok) throw new Error(`Supabase ${res.status}: ${path}`);
+  const total = wantCount ? Number((res.headers.get("content-range") || "").split("/")[1]) : NaN;
+  return { rows: await res.json(), total };
+}
+
+// 첫 페이지에서 전체 건수를 받아 나머지 페이지를 동시에 가져온다.
+// 순차 페이징은 OFFSET 이 깊어질수록 느려져(실측: 1페이지 0.8s → 277페이지 2.8s) 큰 표에서 분 단위가 된다.
+// 페이지 순서대로 이어붙이므로 호출부의 order 절이 보장하는 정렬은 그대로 유지된다.
 async function fetchPaged(path) {
-  const rows = [];
-  for (let from = 0; ; from += PAGE) {
-    const res = await fetch(`${SUPABASE_URL}/rest/v1/${path}`, {
-      headers: { ...HEADERS, Range: `${from}-${from + PAGE - 1}` },
-    });
-    if (!res.ok) throw new Error(`Supabase ${res.status}: ${path}`);
-    const chunk = await res.json();
-    rows.push(...chunk);
-    if (chunk.length < PAGE) return rows;
+  const first = await fetchRange(path, 0, true);
+  if (first.rows.length < PAGE) return first.rows;
+
+  const offsets = [];
+  if (Number.isFinite(first.total)) {
+    for (let from = PAGE; from < first.total; from += PAGE) offsets.push(from);
+  } else {
+    // count 헤더를 못 받은 경우에만 기존 순차 방식으로 폴백
+    const rows = first.rows;
+    for (let from = PAGE; ; from += PAGE) {
+      const { rows: chunk } = await fetchRange(path, from);
+      rows.push(...chunk);
+      if (chunk.length < PAGE) return rows;
+    }
   }
+
+  const pages = new Array(offsets.length);
+  let next = 0;
+  const worker = async () => {
+    for (let i = next++; i < offsets.length; i = next++) {
+      pages[i] = (await fetchRange(path, offsets[i])).rows;
+    }
+  };
+  await Promise.all(Array.from({ length: Math.min(CONCURRENCY, offsets.length) }, worker));
+
+  const out = first.rows;
+  for (const chunk of pages) for (const r of chunk) out.push(r);
+  return out;
 }
 
 // web_meta 화면 구성 메타 (key='bond-monitor', 파이프라인 specs.py 가 단일 소스)
@@ -30,10 +66,19 @@ export async function loadWebMeta() {
   }
 }
 
-// bond_spread_daily 전체(2025-05-30~) → Map(label -> [{d, y, bp}] 날짜 오름차순)
+// bond_spread_daily 최근 SPREAD_DAYS 일 → Map(label -> [{d, y, bp}] 날짜 오름차순)
+//
+// 표는 2016-01-04 부터 쌓여 있지만(2026-08-05 실측 278,654행) 화면이 쓰는 최대 구간은
+// 최근 1년(app.js lastYear) + 연초대비(YTD)뿐이다. 전체를 받으면 279페이지가 되어
+// 로드 자체가 110초였다(2026-08-05 실측). 365일 경계에서 잘리지 않도록 여유 35일을 더한다.
+// 1년보다 긴 구간을 화면에 새로 넣을 때는 이 값도 같이 늘려야 한다.
+// (국면별 분석의 '전체 기간 통계'는 이 표가 아니라 서버 집계 bond_regime_stats 를 쓴다)
+const SPREAD_DAYS = 400;
+
 export async function loadSpreadSeries() {
   const rows = await fetchPaged(
-    "bond_spread_daily?select=trade_date,label,yield,vs_govt_bp&order=trade_date.asc,label.asc"
+    "bond_spread_daily?select=trade_date,label,yield,vs_govt_bp" +
+      `&trade_date=gte.${sinceISO(SPREAD_DAYS)}&order=trade_date.asc,label.asc`
   );
   const map = new Map();
   for (const r of rows) {
@@ -81,7 +126,6 @@ async function fetchRecentSafe(path) {
     return [];
   }
 }
-const sinceISO = (days) => new Date(Date.now() - days * 86400 * 1000).toISOString().slice(0, 10);
 
 // KRX 국채선물 일별 (근월물 판별은 화면에서 volume 기준)
 export function loadKrxFutures(days = 30) {
