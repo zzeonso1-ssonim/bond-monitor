@@ -13,6 +13,7 @@ import {
   loadIssueStats, loadIssueMonthly,
 } from "./api.js";
 import { lineChart, regimeRangeChart, dualSpreadChart, barChart } from "./charts.js";
+import { downloadWeeklyReportPdf } from "./report-pdf.js";
 
 const $ = (sel, root = document) => root.querySelector(sel);
 
@@ -117,7 +118,7 @@ $("#tabs").addEventListener("click", (e) => {
   for (const v of document.querySelectorAll(".view")) v.classList.toggle("active", v.id === `view-${btn.dataset.view}`);
 });
 
-/* ══ PDF 저장 — 현재 탭만 인쇄. 인쇄 중 라이트 테마 강제(색 왜곡 방지) ══ */
+/* ══ PDF — 버튼은 최신 데이터로 주간 2쪽 파일 직다운로드. Ctrl+P는 현재 탭 인쇄 유지 ══ */
 (function initPdf() {
   let saved = null, forced = false;
   window.addEventListener("beforeprint", () => {
@@ -134,7 +135,22 @@ $("#tabs").addEventListener("click", (e) => {
     if (saved) document.documentElement.setAttribute("data-theme", saved);
     else document.documentElement.removeAttribute("data-theme");
   });
-  $("#pdfBtn").addEventListener("click", () => window.print());
+  $("#pdfBtn").addEventListener("click", async () => {
+    const btn = $("#pdfBtn");
+    if (btn.disabled) return;
+    const old = btn.textContent;
+    btn.disabled = true;
+    btn.textContent = "PDF 생성 중…";
+    try {
+      await downloadWeeklyReportPdf(S);
+    } catch (err) {
+      console.error(err);
+      alert(`PDF 생성 실패: ${err.message}`);
+    } finally {
+      btn.textContent = old;
+      btn.disabled = false;
+    }
+  });
 })();
 
 /* ══ 데이터 파생 유틸 ══ */
@@ -278,7 +294,9 @@ function renderMonitor() {
         </tr></thead>
         <tbody id="mon-body"></tbody>
       </table>
-    </div>`;
+    </div>
+    <div class="section-title">국면별 분석</div>
+    <div id="mon-regime"></div>`;
 
   // 시장지표 스탯 타일 — market_daily 최신값 + 전일비
   const tiles = $("#mon-tiles", root);
@@ -523,15 +541,15 @@ function renderMatrix() {
   const root = $("#view-matrix");
   root.innerHTML = `
     <p class="section-sub" id="mx-caption"></p>
+    <div class="card">
+      <div class="card-head"><h2 id="mx-title">셀을 클릭하면 추이가 표시됩니다</h2><span class="hint">최근 1년, 스프레드(bp)</span></div>
+      <div id="mx-chart"></div>
+    </div>
     <div class="table-scroll">
       <table class="data">
         <thead><tr id="mx-head"></tr></thead>
         <tbody id="mx-body"></tbody>
       </table>
-    </div>
-    <div class="card">
-      <div class="card-head"><h2 id="mx-title">셀을 클릭하면 추이가 표시됩니다</h2><span class="hint">최근 1년, 스프레드(bp)</span></div>
-      <div id="mx-chart"></div>
     </div>`;
 
   $("#mx-caption", root).textContent =
@@ -816,9 +834,15 @@ function selectRvGroup(groupName, pairLabel) {
 
 /* ══════════════ 국면별 분석 ══════════════ */
 function renderRegime() {
-  const root = $("#view-regime");
-  const labels = CFG.regimeLabels.filter((l) => S.stats.regime.has(l));
-  if (!labels.length) {
+  const root = $("#mon-regime");
+  const entries = CFG.regimeLabels
+    .filter((label) => S.stats.regime.has(label))
+    .map((label) => ({ kind: "regime", label }));
+  const cardCorpGroup = CFG.rvGroups.find((g) => g.group.includes("여전채-회사채"));
+  for (const pair of cardCorpGroup?.pairs || []) {
+    if (S.stats.rv.has(pair.label)) entries.push({ kind: "rv", label: pair.label });
+  }
+  if (!entries.length) {
     root.innerHTML = "";
     const p = document.createElement("p");
     p.className = "hint";
@@ -827,7 +851,7 @@ function renderRegime() {
     return;
   }
   root.innerHTML = `
-    <p class="section-sub">기준금리 대비 스프레드(bp), 전체 기간 통계</p>
+    <p class="section-sub" id="rg-caption"></p>
     <div class="controls"><select class="ctl" id="rg-select"></select></div>
     <div class="card"><div id="rg-chart"></div></div>
     <div class="table-scroll">
@@ -838,14 +862,26 @@ function renderRegime() {
     </div>`;
 
   const sel = $("#rg-select", root);
-  for (const l of labels) {
+  let group = null;
+  for (const entry of entries) {
+    const groupLabel = entry.kind === "rv" ? "여전채-회사채" : "기준금리 대비";
+    if (!group || group.label !== groupLabel) {
+      group = document.createElement("optgroup");
+      group.label = groupLabel;
+      sel.appendChild(group);
+    }
     const op = document.createElement("option");
-    op.value = l;
-    op.textContent = l;
-    sel.appendChild(op);
+    op.value = entry.label;
+    op.dataset.kind = entry.kind;
+    op.textContent = entry.label;
+    group.appendChild(op);
   }
   const draw = () => {
-    const rows = S.stats.regime.get(sel.value) || [];
+    const kind = sel.selectedOptions[0]?.dataset.kind || "regime";
+    const rows = S.stats[kind].get(sel.value) || [];
+    $("#rg-caption", root).textContent = kind === "rv"
+      ? "여전채 AA- − 회사채 AA- 동일 만기 수익률차(bp), 전체 기간 통계"
+      : "기준금리 대비 스프레드(bp), 전체 기간 통계";
     regimeRangeChart($("#rg-chart"), rows, { unit: "bp" });
     const body = $("#rg-body");
     body.textContent = "";
@@ -1955,6 +1991,7 @@ async function main() {
 
     // 화면 구성: web_meta 있으면 메타, 없으면(null) config.js 폴백 — applyMeta 가 전 화면 렌더
     applyMeta(meta);
+    $("#pdfBtn").disabled = false;
   } catch (err) {
     $("#loading").textContent = `데이터 로드 실패: ${err.message}`;
     return;

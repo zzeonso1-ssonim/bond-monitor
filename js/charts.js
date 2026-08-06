@@ -121,7 +121,6 @@ async function downloadChartPng(svg, container) {
     });
     clone.appendChild(legend);
   }
-
   const blob = new Blob([new XMLSerializer().serializeToString(clone)], {
     type: "image/svg+xml;charset=utf-8",
   });

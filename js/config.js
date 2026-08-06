@@ -105,6 +105,9 @@ export const MARKET_TABLE = [
   { group: "해외금리(%)", items: [
     { symbol: "UST2Y", name: "미국채 2Y", digits: 3, rate: true },
     { symbol: "UST10Y", name: "미국채 10Y", digits: 3, rate: true },
+    { symbol: "DE10Y", name: "독일채 10Y", digits: 3, rate: true },
+    { symbol: "GB10Y", name: "영국채 10Y", digits: 3, rate: true },
+    { symbol: "AU10Y", name: "호주채 10Y", digits: 3, rate: true },
   ] },
   { group: "상품", items: [
     { symbol: "GSCI", name: "GSCI", digits: 2 },

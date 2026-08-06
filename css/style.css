@@ -133,6 +133,7 @@ a { color: inherit; }
   font-weight: 650; padding: 6px 12px; cursor: pointer;
 }
 .pdf-btn:hover { background: var(--mint-50); }
+.pdf-btn:disabled { opacity: .5; cursor: wait; background: var(--surface-2); }
 
 /* ── 본문 ── */
 main { max-width: 1180px; margin: 0 auto; padding: 20px 24px 48px; }
