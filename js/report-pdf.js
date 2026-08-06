@@ -3,6 +3,7 @@
 
 const PAGE_W = 2339;
 const PAGE_H = 1654;
+const RENDER_SCALE = 2;
 const PDF_W = 842;
 const PDF_H = 595;
 const BLUE = "#0052ff";
@@ -24,9 +25,10 @@ const dateShort = (d) => d ? `${+d.slice(5, 7)}/${+d.slice(8, 10)}` : "—";
 
 function canvasPage() {
   const canvas = document.createElement("canvas");
-  canvas.width = PAGE_W;
-  canvas.height = PAGE_H;
+  canvas.width = PAGE_W * RENDER_SCALE;
+  canvas.height = PAGE_H * RENDER_SCALE;
   const ctx = canvas.getContext("2d");
+  ctx.scale(RENDER_SCALE, RENDER_SCALE);
   ctx.fillStyle = "#fff";
   ctx.fillRect(0, 0, PAGE_W, PAGE_H);
   ctx.textBaseline = "middle";
@@ -67,7 +69,7 @@ function footer(ctx, pageNo, note) {
 }
 
 function tableCard(ctx, cfg) {
-  const { x, y, w, h, title, subtitle = "", columns, rows, widths, rowSize = 19 } = cfg;
+  const { x, y, w, h, title, subtitle = "", columns, rows, widths, rowSize = 21 } = cfg;
   roundRect(ctx, x, y, w, h);
   text(ctx, title, x + 28, y + 35, { size: 24, weight: 700 });
   if (subtitle) text(ctx, subtitle, x + w - 28, y + 35, { size: 15, color: MUTED, align: "right" });
@@ -80,7 +82,7 @@ function tableCard(ctx, cfg) {
   columns.forEach((c, i) => {
     const align = i === 0 ? "left" : "right";
     text(ctx, c, align === "left" ? cx + 9 : cx + colW[i] - 9, top + 20, {
-      size: 16, color: MUTED, weight: 700, align,
+      size: 19, color: MUTED, weight: 700, align,
     });
     cx += colW[i];
   });
@@ -124,6 +126,18 @@ function marketPoints(state, symbol) {
 }
 function valueOn(points, d) { return points.find((p) => p.d === d)?.v ?? null; }
 function latest(points) { return points.length ? points[points.length - 1] : null; }
+function atOrBeforePoint(points, target) {
+  for (let i = points.length - 1; i >= 0; i--) if (points[i].d <= target) return points[i];
+  return null;
+}
+function datedValue(point, digits, showDate = false) {
+  if (!point) return "—";
+  return `${num(point.v, digits)}${showDate ? ` (${dateShort(point.d)})` : ""}`;
+}
+function sixMonths(points, asof) {
+  const cutoff = asof ? isoShift(asof, -183) : null;
+  return cutoff ? points.filter((p) => p.d >= cutoff) : points.slice(-130);
+}
 
 function weekStart(iso) {
   const d = new Date(`${iso}T00:00:00Z`);
@@ -183,12 +197,13 @@ function weeklyFlowChart(state) {
         .filter((r) => weekStart(r.trade_date) === wk && finite(r[key]))
         .reduce((sum, r) => sum + +r[key], 0)),
     })),
+    valueLabels: { type: "series", index: Math.max(0, weeks.length - 1) },
   };
 }
 
 function pageOne(state) {
   const { canvas, ctx } = canvasPage();
-  header(ctx, 1, state.asof, "금리 · 주간 변동 · 투자자 수급 · 주식/외환/해외");
+  header(ctx, 1, state.asof, "대신자산운용 채권운용본부");
 
   const rateDefs = [
     ["국고 3년", "bond", "국고채 3년"], ["국고 5년", "bond", "국고채 5년"],
@@ -199,12 +214,27 @@ function pageOne(state) {
   const baseDates = yieldPoints(state, "국고채 3년").slice(-5).map((p) => p.d);
   const rateRows = rateDefs.map(([name, kind, key]) => {
     const pts = kind === "bond" ? yieldPoints(state, key) : marketPoints(state, key);
-    return [name, ...baseDates.map((d) => num(valueOn(pts, d), 3))];
+    return [name, ...baseDates.map((d) => {
+      if (kind !== "market") return num(valueOn(pts, d), 3);
+      const point = atOrBeforePoint(pts, d);
+      return point ? `${num(point.v, 3)}(${dateShort(point.d)})` : "—";
+    })];
   });
   tableCard(ctx, {
-    x: 85, y: 224, w: 1072, h: 454, title: "지난 주 채권금리", subtitle: "단위 % · 일별",
+    x: 85, y: 224, w: 900, h: 454, title: "지난 주 채권금리", subtitle: "단위 %",
     columns: ["금리", ...baseDates.map(dateShort)], rows: rateRows,
-    widths: [280, 138, 138, 138, 138, 190], rowSize: 18,
+    widths: [190, 132, 132, 132, 132, 132], rowSize: 18,
+  });
+
+  const keyRateSeries = [
+    ["국고3Y", yieldPoints(state, "국고채 3년"), BLUE],
+    ["국고10Y", yieldPoints(state, "국고채 10년"), BLUE_2],
+    ["회사AA-3Y", yieldPoints(state, "회사채 AA- 3년"), "#64748b"],
+    ["미국10Y", marketPoints(state, "UST10Y"), "#0f172a"],
+  ].map(([name, points, color]) => ({ name, points: sixMonths(points, state.asof), color }));
+  chartCard(ctx, {
+    x: 1007, y: 224, w: 650, h: 454, title: "주요 금리 추이", unit: "%",
+    series: keyRateSeries, note: "최근 6개월",
   });
 
   const changeDefs = [
@@ -220,26 +250,27 @@ function pageOne(state) {
     const v = futuresWeekly(state, product);
     changeRows.push([name, num(v?.value, 2), signed(v?.delta, 0), "틱"]);
   }
+  const bondAsof = latest(yieldPoints(state, "국고채 3년"))?.d || state.asof;
   tableCard(ctx, {
-    x: 1182, y: 224, w: 1072, h: 454, title: "주간 채권금리 변동폭", subtitle: "최근값 대비 5관측치 전",
-    columns: ["지표", "최근값", "주간", "단위"], rows: changeRows,
-    widths: [435, 215, 215, 157], rowSize: 18,
+    x: 1679, y: 224, w: 575, h: 454, title: "주간 변동폭", subtitle: "5관측치 전 대비",
+    columns: ["지표", `${dateShort(bondAsof)} 값`, "주간", "단위"], rows: changeRows,
+    widths: [218, 120, 112, 75], rowSize: 18,
   });
 
   const stockDefs = [
-    ["KOSPI", "KOSPI", 2], ["나스닥", "NASDAQ", 2], ["S&P500", "SP500", 2],
-    ["니케이225", "NIKKEI", 2], ["상해종합", "SSE", 2], ["항셍H", "HSCEI", 2],
-    ["유로스톡스50", "SX5E", 2],
+    ["KOSPI", "KOSPI", 2, false], ["나스닥", "NASDAQ", 2, true], ["S&P500", "SP500", 2, true],
+    ["니케이225", "NIKKEI", 2, true], ["상해종합", "SSE", 2, true], ["항셍H", "HSCEI", 2, true],
+    ["유로스톡스50", "SX5E", 2, true],
   ];
   const fxDefs = [
-    ["달러/원", "USDKRW", 2], ["달러/엔", "USDJPY", 3],
-    ["유로/달러", "EURUSD", 4], ["호주/달러", "AUDUSD", 4], ["파운드/달러", "GBPUSD", 4],
-    ["위안/달러", "USDCNY", 4], ["달러인덱스", "DXY", 2],
+    ["달러/원", "USDKRW", 2, false], ["달러/엔", "USDJPY", 3, true],
+    ["유로/달러", "EURUSD", 4, true], ["호주/달러", "AUDUSD", 4, true], ["파운드/달러", "GBPUSD", 4, true],
+    ["위안/달러", "USDCNY", 4, true], ["달러인덱스", "DXY", 2, true],
   ];
-  const marketRows = (defs) => defs.map(([name, symbol, digits]) => {
+  const marketRows = (defs) => defs.map(([name, symbol, digits, overseas]) => {
     const pts = marketPoints(state, symbol); const last = latest(pts); const old = pts[Math.max(0, pts.length - 6)];
     const pct = last && old && old !== last && old.v ? (last.v / old.v - 1) * 100 : null;
-    return [name, num(last?.v, digits), signed(pct, 2), last?.d ? dateShort(last.d) : "—"];
+    return [name, datedValue(last, digits, overseas), signed(pct, 2)];
   });
 
   const overseasDefs = [
@@ -251,25 +282,29 @@ function pageOne(state) {
   const overseasRows = overseasDefs.map(([name, symbol, digits, rate]) => {
     const pts = marketPoints(state, symbol); const last = latest(pts); const old = pts[Math.max(0, pts.length - 6)];
     const delta = last && old && old !== last ? (rate ? (last.v - old.v) * 100 : old.v ? (last.v / old.v - 1) * 100 : null) : null;
-    return [name, num(last?.v, digits), signed(delta, rate ? 1 : 2), rate ? "bp" : "%", last?.d ? dateShort(last.d) : "—"];
+    return [name, datedValue(last, digits, true), signed(delta, rate ? 1 : 2), rate ? "bp" : "%"];
   });
   const cardW = 708, marketY = 704, marketH = 408;
+  const koreaDates = [
+    latest(marketPoints(state, "KOSPI"))?.d || state.asof,
+    latest(marketPoints(state, "USDKRW"))?.d || state.asof,
+  ];
   for (const [i, title, defs] of [[0, "주식시장", stockDefs], [1, "외환시장", fxDefs]]) tableCard(ctx, {
     x: 85 + i * (cardW + 22), y: marketY, w: cardW, h: marketH, title, subtitle: "주간 변동률 %",
-    columns: ["지표", "최근값", "주간", "기준일"], rows: marketRows(defs),
-    widths: [205, 165, 130, 158], rowSize: 14,
+    columns: ["지표", `${dateShort(koreaDates[i])} 값`, "주간"], rows: marketRows(defs),
+    widths: [205, 285, 168], rowSize: 18,
   });
   tableCard(ctx, {
     x: 85 + 2 * (cardW + 22), y: marketY, w: 709, h: marketH, title: "해외", subtitle: "금리 bp · 기타 %",
-    columns: ["지표", "최근값", "주간", "단위", "기준일"], rows: overseasRows,
-    widths: [170, 150, 105, 70, 164], rowSize: 13,
+    columns: ["지표", "값 (현지 기준일)", "주간", "단위"], rows: overseasRows,
+    widths: [155, 285, 125, 94], rowSize: 17,
   });
 
   const flow = weeklyFlowRows(state);
   tableCard(ctx, {
     x: 85, y: 1138, w: 1285, h: 420, title: "투자자 동향", subtitle: `주간 합산 · 억원 · ${dateShort(flow.asof)}`,
     columns: ["투자자", ...flow.classes], rows: flow.rows,
-    widths: [155, 120, 120, 120, 120, 120, 120, 120, 120, 120], rowSize: 11,
+    widths: [155, 120, 120, 120, 120, 120, 120, 120, 120, 120], rowSize: 15,
   });
   chartCard(ctx, {
     x: 1392, y: 1138, w: 862, h: 420, title: "투자주체별 4주 순매수",
@@ -282,8 +317,8 @@ function pageOne(state) {
 function chartCard(ctx, cfg) {
   const { x, y, w, h, title, series: lines = [], unit = "bp", bar = false, grouped = null, note = "" } = cfg;
   roundRect(ctx, x, y, w, h, 20);
-  text(ctx, title, x + 24, y + 28, { size: 19, weight: 700 });
-  text(ctx, note || unit, x + w - 24, y + 28, { size: 13, color: MUTED, align: "right" });
+  text(ctx, title, x + 24, y + 28, { size: 22, weight: 700 });
+  text(ctx, note || unit, x + w - 24, y + 28, { size: 16, color: MUTED, align: "right" });
   const plot = { x: x + 46, y: y + 62, w: w - 68, h: h - 91 };
   if (grouped) drawGroupedBars(ctx, plot, grouped, unit);
   else if (bar) drawBars(ctx, plot, lines, unit);
@@ -323,15 +358,24 @@ function drawGroupedBars(ctx, plot, grouped, unit) {
       const yy = yp(v);
       ctx.fillStyle = s.color || [BLUE, BLUE_2, "#94a3b8", "#0f172a"][si % 4];
       ctx.fillRect(xx, Math.min(yy, zeroY), bw, Math.max(1, Math.abs(zeroY - yy)));
+      const labels = grouped.valueLabels;
+      const showValue = labels?.type === "series" && si === labels.index;
+      if (showValue) text(ctx, num(v, unit === "억원" ? 0 : 1), xx + bw / 2,
+        v >= 0 ? Math.min(yy, zeroY) - 10 : Math.max(yy, zeroY) + 11, {
+          size: 12, color: INK, weight: 700, align: "center", mono: true,
+        });
     });
-    text(ctx, label, area.x + (ci + .5) * slot, area.y + area.h + 14, { size: categories.length > 8 ? 9 : 11, color: MUTED, align: "center" });
+    text(ctx, label, area.x + (ci + .5) * slot, area.y + area.h + 14, { size: categories.length > 8 ? 11 : 13, color: MUTED, align: "center" });
   });
   let lx = area.x;
   groups.forEach((s, i) => {
     ctx.fillStyle = s.color || [BLUE, BLUE_2, "#94a3b8", "#0f172a"][i % 4];
     ctx.fillRect(lx, plot.y + 7, 14, 7);
-    text(ctx, s.name, lx + 20, plot.y + 11, { size: 11, color: MUTED });
-    lx += Math.max(92, ctx.measureText(s.name).width + 43);
+    const categoryLatest = grouped.valueLabels?.type === "category"
+      ? s.values?.[grouped.valueLabels.index] : null;
+    const legendName = `${s.name}${finite(categoryLatest) ? ` ${num(categoryLatest, unit === "억원" ? 0 : 1)}` : ""}`;
+    text(ctx, legendName, lx + 20, plot.y + 11, { size: 14, color: MUTED });
+    lx += Math.max(92, ctx.measureText(legendName).width + 43);
   });
 }
 
@@ -339,6 +383,18 @@ function drawLines(ctx, plot, lines, unit) {
   const valid = lines.map((s) => ({ ...s, points: (s.points || []).filter((p) => finite(p.v)).slice(-260) }))
     .filter((s) => s.points.length);
   if (!valid.length) { text(ctx, "데이터 없음", plot.x + plot.w / 2, plot.y + plot.h / 2, { size: 17, color: MUTED, align: "center" }); return; }
+  const legendH = valid.length * 22 + 6;
+  const area = { x: plot.x, y: plot.y + legendH, w: plot.w, h: plot.h - legendH };
+  valid.forEach((s, idx) => {
+    const last = s.points[s.points.length - 1];
+    const max = s.points.reduce((a, p) => p.v > a.v ? p : a);
+    const min = s.points.reduce((a, p) => p.v < a.v ? p : a);
+    const digits = unit === "%" ? 3 : unit === "억원" ? 0 : 1;
+    text(ctx, `${s.name}  최신(${dateShort(last.d)}) ${num(last.v, digits)}  ·  최고 ${num(max.v, digits)}  ·  최저 ${num(min.v, digits)}`,
+      plot.x + 2, plot.y + 10 + idx * 22, {
+        size: 14, color: s.color || [BLUE, BLUE_2, "#64748b", "#0f172a"][idx % 4], weight: 700, mono: true,
+      });
+  });
   const dates = valid.flatMap((s) => s.points.map((p) => p.d)).sort();
   const minD = dates[0], maxD = dates[dates.length - 1];
   const t0 = new Date(`${minD}T00:00:00Z`).getTime(), t1 = new Date(`${maxD}T00:00:00Z`).getTime();
@@ -346,12 +402,12 @@ function drawLines(ctx, plot, lines, unit) {
   let lo = Math.min(...vals), hi = Math.max(...vals);
   if (lo === hi) { lo -= 1; hi += 1; }
   const pad = (hi - lo) * .12; lo -= pad; hi += pad;
-  const xp = (d) => plot.x + ((new Date(`${d}T00:00:00Z`).getTime() - t0) / Math.max(1, t1 - t0)) * plot.w;
-  const yp = (v) => plot.y + plot.h - ((v - lo) / (hi - lo)) * plot.h;
+  const xp = (d) => area.x + ((new Date(`${d}T00:00:00Z`).getTime() - t0) / Math.max(1, t1 - t0)) * area.w;
+  const yp = (v) => area.y + area.h - ((v - lo) / (hi - lo)) * area.h;
   ctx.strokeStyle = LINE; ctx.lineWidth = 1;
   for (let i = 0; i < 3; i++) {
-    const yy = plot.y + i * plot.h / 2; ctx.beginPath(); ctx.moveTo(plot.x, yy); ctx.lineTo(plot.x + plot.w, yy); ctx.stroke();
-    text(ctx, num(hi - i * (hi - lo) / 2, unit === "억원" ? 0 : 1), plot.x - 7, yy, { size: 11, color: MUTED, align: "right", mono: true });
+    const yy = area.y + i * area.h / 2; ctx.beginPath(); ctx.moveTo(area.x, yy); ctx.lineTo(area.x + area.w, yy); ctx.stroke();
+    text(ctx, num(hi - i * (hi - lo) / 2, unit === "억원" ? 0 : unit === "%" ? 3 : 1), area.x - 7, yy, { size: 14, color: MUTED, align: "right", mono: true });
   }
   valid.forEach((s, idx) => {
     ctx.strokeStyle = s.color || [BLUE, BLUE_2, "#94a3b8", "#0f172a"][idx % 4]; ctx.lineWidth = idx === 0 ? 4 : 3;
@@ -359,13 +415,15 @@ function drawLines(ctx, plot, lines, unit) {
     s.points.forEach((p, i) => { const xx = xp(p.d), yy = yp(p.v); i ? ctx.lineTo(xx, yy) : ctx.moveTo(xx, yy); });
     ctx.stroke();
     const last = s.points[s.points.length - 1];
-    const lx = plot.x + 8 + (idx % 2) * plot.w * .5;
-    text(ctx, `${s.name} ${num(last.v, unit === "억원" ? 0 : 1)}`, lx, plot.y + 13 + Math.floor(idx / 2) * 18, {
-      size: 11, color: s.color || [BLUE, BLUE_2, "#64748b", "#0f172a"][idx % 4], weight: 700, mono: true,
-    });
+    const max = s.points.reduce((a, p) => p.v > a.v ? p : a);
+    const min = s.points.reduce((a, p) => p.v < a.v ? p : a);
+    for (const [p, r, fill] of [[max, 4, "#fff"], [min, 4, "#fff"], [last, 5, s.color || BLUE]]) {
+      ctx.beginPath(); ctx.arc(xp(p.d), yp(p.v), r, 0, Math.PI * 2);
+      ctx.fillStyle = fill; ctx.fill(); ctx.strokeStyle = s.color || BLUE; ctx.lineWidth = 2; ctx.stroke();
+    }
   });
-  text(ctx, dateShort(minD), plot.x, plot.y + plot.h + 14, { size: 11, color: MUTED });
-  text(ctx, dateShort(maxD), plot.x + plot.w, plot.y + plot.h + 14, { size: 11, color: MUTED, align: "right" });
+  text(ctx, dateShort(minD), area.x, area.y + area.h + 14, { size: 14, color: MUTED });
+  text(ctx, dateShort(maxD), area.x + area.w, area.y + area.h + 14, { size: 14, color: MUTED, align: "right" });
 }
 
 function drawBars(ctx, plot, rows, unit) {
@@ -398,7 +456,11 @@ function issueSeries(state) {
 function issueBars(state) {
   const lines = issueSeries(state);
   const categories = lines[0]?.points.map((p) => p.d.slice(2, 7).replace("-", "/")) || [];
-  return { categories, series: lines.map((s) => ({ ...s, values: s.points.map((p) => p.v) })) };
+  return {
+    categories,
+    series: lines.map((s) => ({ ...s, values: s.points.map((p) => p.v) })),
+    valueLabels: { type: "category", index: Math.max(0, categories.length - 1) },
+  };
 }
 
 function isoShift(iso, days) {
@@ -423,6 +485,7 @@ function creditComparison(state, labels) {
     ].map(([name, color], i) => ({
       name, color, values: labels.map((label) => targets.length ? atOrBefore(bpPoints(state, label), targets[i]) : null),
     })),
+    valueLabels: { type: "series", index: 0 },
   };
 }
 
@@ -497,11 +560,11 @@ function pdfFromJpegs(images) {
   obj(1, "<< /Type /Catalog /Pages 2 0 R >>");
   obj(2, "<< /Type /Pages /Kids [3 0 R 6 0 R] /Count 2 >>");
   obj(3, `<< /Type /Page /Parent 2 0 R /MediaBox [0 0 ${PDF_W} ${PDF_H}] /Resources << /XObject << /Im1 4 0 R >> >> /Contents 5 0 R >>`);
-  obj(4, `<< /Type /XObject /Subtype /Image /Width ${PAGE_W} /Height ${PAGE_H} /ColorSpace /DeviceRGB /BitsPerComponent 8 /Filter /DCTDecode /Length ${images[0].length} >>`, images[0]);
+  obj(4, `<< /Type /XObject /Subtype /Image /Width ${PAGE_W * RENDER_SCALE} /Height ${PAGE_H * RENDER_SCALE} /ColorSpace /DeviceRGB /BitsPerComponent 8 /Filter /DCTDecode /Length ${images[0].length} >>`, images[0]);
   const draw1 = `q ${PDF_W} 0 0 ${PDF_H} 0 0 cm /Im1 Do Q`;
   obj(5, `<< /Length ${enc.encode(draw1).length} >>`, enc.encode(draw1));
   obj(6, `<< /Type /Page /Parent 2 0 R /MediaBox [0 0 ${PDF_W} ${PDF_H}] /Resources << /XObject << /Im2 7 0 R >> >> /Contents 8 0 R >>`);
-  obj(7, `<< /Type /XObject /Subtype /Image /Width ${PAGE_W} /Height ${PAGE_H} /ColorSpace /DeviceRGB /BitsPerComponent 8 /Filter /DCTDecode /Length ${images[1].length} >>`, images[1]);
+  obj(7, `<< /Type /XObject /Subtype /Image /Width ${PAGE_W * RENDER_SCALE} /Height ${PAGE_H * RENDER_SCALE} /ColorSpace /DeviceRGB /BitsPerComponent 8 /Filter /DCTDecode /Length ${images[1].length} >>`, images[1]);
   const draw2 = `q ${PDF_W} 0 0 ${PDF_H} 0 0 cm /Im2 Do Q`;
   obj(8, `<< /Length ${enc.encode(draw2).length} >>`, enc.encode(draw2));
   const xref = length;
@@ -517,7 +580,7 @@ export async function buildWeeklyReportPdfBlob(state) {
   if (!state?.series?.size) throw new Error("채권 데이터가 아직 로드되지 않았습니다.");
   if (document.fonts?.ready) await document.fonts.ready;
   const pages = [pageOne(state), pageTwo(state)];
-  const jpgs = pages.map((c) => bytesFromDataUrl(c.toDataURL("image/jpeg", 0.94)));
+  const jpgs = pages.map((c) => bytesFromDataUrl(c.toDataURL("image/jpeg", 0.99)));
   return new Blob([pdfFromJpegs(jpgs)], { type: "application/pdf" });
 }
 
