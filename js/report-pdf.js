@@ -12,8 +12,8 @@ const INK = "#0a0b0d";
 const MUTED = "#5b616e";
 const LINE = "#d8dee8";
 const PANEL = "#f6f8fb";
-const FONT = '"Apple SD Gothic Neo", "Noto Sans KR", Pretendard, Arial, sans-serif';
-const MONO = '"IBM Plex Mono", Menlo, Consolas, monospace';
+const FONT = 'system-ui, -apple-system, "Segoe UI", "Apple SD Gothic Neo", "Malgun Gothic", Arial, sans-serif';
+const MONO = '"SFMono-Regular", "IBM Plex Mono", Menlo, Consolas, monospace';
 
 const finite = (v) => v != null && Number.isFinite(+v);
 const num = (v, digits = 2) => finite(v) ? (+v).toLocaleString("ko-KR", {
@@ -124,6 +124,33 @@ function marketPoints(state, symbol) {
   return (state.market.get(symbol) || []).filter((r) => finite(r.value))
     .map((r) => ({ d: r.trade_date, v: +r.value })).sort((a, b) => a.d.localeCompare(b.d));
 }
+
+async function loadVerifiedMarketOverrides() {
+  try {
+    const url = new URL("./data/weekly-market-overrides.json", window.location.href);
+    const response = await fetch(url, { cache: "no-store" });
+    if (!response.ok) return null;
+    const payload = await response.json();
+    if (!Array.isArray(payload?.rows)) return null;
+    return payload;
+  } catch {
+    return null;
+  }
+}
+
+function applyVerifiedMarketOverrides(state, payload) {
+  if (payload?.price_basis !== "previous-close" || !payload?.rows?.length) return state;
+  const market = new Map(state.market);
+  for (const row of payload.rows) {
+    if (!row?.symbol || !row?.trade_date || !finite(row.value)) continue;
+    if (finite(row.check?.difference_bp) && row.check.difference_bp > (payload.max_difference_bp ?? 2)) continue;
+    const current = market.get(row.symbol) || [];
+    const merged = current.filter((item) => item.trade_date !== row.trade_date);
+    merged.push({ trade_date: row.trade_date, symbol: row.symbol, value: +row.value });
+    market.set(row.symbol, merged);
+  }
+  return { ...state, market, marketOverrideMeta: payload };
+}
 function valueOn(points, d) { return points.find((p) => p.d === d)?.v ?? null; }
 function latest(points) { return points.length ? points[points.length - 1] : null; }
 function atOrBeforePoint(points, target) {
@@ -133,6 +160,23 @@ function atOrBeforePoint(points, target) {
 function datedValue(point, digits, showDate = false) {
   if (!point) return "—";
   return `${num(point.v, digits)}${showDate ? ` (${dateShort(point.d)})` : ""}`;
+}
+function businessDayLag(from, to) {
+  if (!from || !to || from >= to) return 0;
+  const d = new Date(`${from}T00:00:00Z`);
+  const end = new Date(`${to}T00:00:00Z`);
+  let count = 0;
+  while (d < end) {
+    d.setUTCDate(d.getUTCDate() + 1);
+    const day = d.getUTCDay();
+    if (day !== 0 && day !== 6) count++;
+  }
+  return count;
+}
+function datedMarketValue(point, digits, reportAsof) {
+  if (!point) return "—";
+  const delayed = businessDayLag(point.d, reportAsof) >= 2;
+  return `${num(point.v, digits)} (${dateShort(point.d)}${delayed ? "*" : ""})`;
 }
 function sixMonths(points, asof) {
   const cutoff = asof ? isoShift(asof, -183) : null;
@@ -192,7 +236,7 @@ function weeklyFlowChart(state) {
   return {
     categories: invs.map(([name]) => name),
     series: weeks.map((wk, i) => ({
-      name: `${dateShort(wk)}주`, color: colors[i],
+      name: dateShort(wk), color: colors[i],
       values: invs.map(([, key]) => net
         .filter((r) => weekStart(r.trade_date) === wk && finite(r[key]))
         .reduce((sum, r) => sum + +r[key], 0)),
@@ -214,9 +258,13 @@ function pageOne(state) {
   const baseDates = yieldPoints(state, "국고채 3년").slice(-5).map((p) => p.d);
   const rateRows = rateDefs.map(([name, kind, key]) => {
     const pts = kind === "bond" ? yieldPoints(state, key) : marketPoints(state, key);
-    return [name, ...baseDates.map((d) => {
+    return [name, ...baseDates.map((d, dateIndex) => {
       if (kind !== "market") return num(valueOn(pts, d), 3);
-      const point = atOrBeforePoint(pts, d);
+      const exact = pts.find((p) => p.d === d);
+      // 공식 발표 시차가 있는 미국 2년물은 마지막 칸에만 사람이 2중 검증한
+      // 최신 관측치를 표시한다. 괄호의 실제 기준일로 국내 표 머리 날짜와 구분한다.
+      const checkedLatest = key === "UST2Y" && dateIndex === baseDates.length - 1 ? latest(pts) : null;
+      const point = exact || (checkedLatest?.d > d ? checkedLatest : null);
       return point ? `${num(point.v, 3)}(${dateShort(point.d)})` : "—";
     })];
   });
@@ -252,7 +300,7 @@ function pageOne(state) {
   }
   const bondAsof = latest(yieldPoints(state, "국고채 3년"))?.d || state.asof;
   tableCard(ctx, {
-    x: 1679, y: 224, w: 575, h: 454, title: "주간 변동폭", subtitle: "5관측치 전 대비",
+    x: 1679, y: 224, w: 575, h: 454, title: "주간 변동폭", subtitle: "전주 대비",
     columns: ["지표", `${dateShort(bondAsof)} 값`, "주간", "단위"], rows: changeRows,
     widths: [218, 120, 112, 75], rowSize: 18,
   });
@@ -274,15 +322,17 @@ function pageOne(state) {
   });
 
   const overseasDefs = [
-    ["미국 2년", "UST2Y", 3, true], ["미국 10년", "UST10Y", 3, true],
-    ["독일 10년", "DE10Y", 3, true], ["영국 10년", "GB10Y", 3, true], ["호주 10년", "AU10Y", 3, true],
-    ["GSCI", "GSCI", 2], ["WTI", "WTI", 2], ["천연가스", "NATGAS", 3], ["구리", "COPPER", 3],
-    ["금", "GOLD", 1], ["비트코인", "BTC", 0], ["소맥", "WHEAT", 2],
+    ["미국 2년", "UST2Y", 3, true, "%"], ["미국 10년", "UST10Y", 3, true, "%"],
+    ["독일 10년", "DE10Y", 3, true, "%"], ["영국 10년", "GB10Y", 3, true, "%"],
+    ["호주 10년", "AU10Y", 3, true, "%"], ["GSCI", "GSCI", 2, false, "pt"],
+    ["WTI", "WTI", 2, false, "USD/bbl"], ["천연가스", "NATGAS", 3, false, "USD/MMBtu"],
+    ["구리", "COPPER", 3, false, "USD/lb"], ["금", "GOLD", 1, false, "USD/oz"],
+    ["비트코인", "BTC", 0, false, "USD"], ["소맥", "WHEAT", 2, false, "US¢/bu"],
   ];
-  const overseasRows = overseasDefs.map(([name, symbol, digits, rate]) => {
+  const overseasRows = overseasDefs.map(([name, symbol, digits, rate, valueUnit]) => {
     const pts = marketPoints(state, symbol); const last = latest(pts); const old = pts[Math.max(0, pts.length - 6)];
     const delta = last && old && old !== last ? (rate ? (last.v - old.v) * 100 : old.v ? (last.v / old.v - 1) * 100 : null) : null;
-    return [name, datedValue(last, digits, true), signed(delta, rate ? 1 : 2), rate ? "bp" : "%"];
+    return [name, datedMarketValue(last, digits, state.asof), valueUnit, signed(delta, rate ? 1 : 2), rate ? "bp" : "%"];
   });
   const cardW = 708, marketY = 704, marketH = 408;
   const koreaDates = [
@@ -295,9 +345,9 @@ function pageOne(state) {
     widths: [205, 285, 168], rowSize: 18,
   });
   tableCard(ctx, {
-    x: 85 + 2 * (cardW + 22), y: marketY, w: 709, h: marketH, title: "해외", subtitle: "금리 bp · 기타 %",
-    columns: ["지표", "값 (현지 기준일)", "주간", "단위"], rows: overseasRows,
-    widths: [155, 285, 125, 94], rowSize: 17,
+    x: 85 + 2 * (cardW + 22), y: marketY, w: 709, h: marketH, title: "해외", subtitle: "값 단위 · 주간 bp/%",
+    columns: ["지표", "값 (기준일)", "값 단위", "주간", "변동단위"], rows: overseasRows,
+    widths: [125, 205, 110, 105, 114], rowSize: 16,
   });
 
   const flow = weeklyFlowRows(state);
@@ -310,7 +360,9 @@ function pageOne(state) {
     x: 1392, y: 1138, w: 862, h: 420, title: "투자주체별 4주 순매수",
     unit: "억원", grouped: weeklyFlowChart(state), note: "주간 합산 · 합계",
   });
-  footer(ctx, 1, "출처: KOFIA · KRX · BOK/FRED · 시장데이터 적재본 | 통안 91일 제외 | 원천별 최신 기준일 병기");
+  const overrideNote = state.marketOverrideMeta?.verified_at
+    ? ` | 해외금리 전일 종가 2중 대조 ${dateShort(state.marketOverrideMeta.verified_at.slice(0, 10))}` : "";
+  footer(ctx, 1, `출처: KOFIA · KRX · BOK/FRED · 시장데이터 적재본 | 원천별 최신 기준일 병기 | * 기준일보다 2영업일 이상 지연${overrideNote}`);
   return canvas;
 }
 
@@ -318,7 +370,9 @@ function chartCard(ctx, cfg) {
   const { x, y, w, h, title, series: lines = [], unit = "bp", bar = false, grouped = null, note = "" } = cfg;
   roundRect(ctx, x, y, w, h, 20);
   text(ctx, title, x + 24, y + 28, { size: 22, weight: 700 });
-  text(ctx, note || unit, x + w - 24, y + 28, { size: 16, color: MUTED, align: "right" });
+  text(ctx, note ? `${note} · 단위 ${unit}` : `단위 ${unit}`, x + w - 24, y + 28, {
+    size: 16, color: MUTED, align: "right",
+  });
   const plot = { x: x + 46, y: y + 62, w: w - 68, h: h - 91 };
   if (grouped) drawGroupedBars(ctx, plot, grouped, unit);
   else if (bar) drawBars(ctx, plot, lines, unit);
@@ -383,18 +437,47 @@ function drawLines(ctx, plot, lines, unit) {
   const valid = lines.map((s) => ({ ...s, points: (s.points || []).filter((p) => finite(p.v)).slice(-260) }))
     .filter((s) => s.points.length);
   if (!valid.length) { text(ctx, "데이터 없음", plot.x + plot.w / 2, plot.y + plot.h / 2, { size: 17, color: MUTED, align: "center" }); return; }
-  const legendH = valid.length * 22 + 6;
-  const area = { x: plot.x, y: plot.y + legendH, w: plot.w, h: plot.h - legendH };
+  const digits = unit === "%" ? 3 : unit === "억원" ? 0 : 1;
+  const headerH = 26;
+  const rowH = 28;
+  const summaryH = headerH + valid.length * rowH;
+  const labelW = Math.min(220, Math.max(168, plot.w * .39));
+  const valueW = (plot.w - labelW) / 3;
+  const headers = ["구분", "현재", "기간 최고", "기간 최저"];
+  const widths = [labelW, valueW, valueW, valueW];
+  ctx.fillStyle = "#eaf0f7";
+  ctx.fillRect(plot.x, plot.y, plot.w, headerH);
+  let hx = plot.x;
+  headers.forEach((label, i) => {
+    text(ctx, label, i === 0 ? hx + 8 : hx + widths[i] - 8, plot.y + headerH / 2, {
+      size: i < 2 ? 15 : 13, color: MUTED, weight: 700, align: i === 0 ? "left" : "right",
+    });
+    hx += widths[i];
+  });
   valid.forEach((s, idx) => {
     const last = s.points[s.points.length - 1];
     const max = s.points.reduce((a, p) => p.v > a.v ? p : a);
     const min = s.points.reduce((a, p) => p.v < a.v ? p : a);
-    const digits = unit === "%" ? 3 : unit === "억원" ? 0 : 1;
-    text(ctx, `${s.name}  최신(${dateShort(last.d)}) ${num(last.v, digits)}  ·  최고 ${num(max.v, digits)}  ·  최저 ${num(min.v, digits)}`,
-      plot.x + 2, plot.y + 10 + idx * 22, {
-        size: 14, color: s.color || [BLUE, BLUE_2, "#64748b", "#0f172a"][idx % 4], weight: 700, mono: true,
+    const rowY = plot.y + headerH + idx * rowH;
+    ctx.strokeStyle = LINE; ctx.lineWidth = 1;
+    ctx.beginPath(); ctx.moveTo(plot.x, rowY + rowH); ctx.lineTo(plot.x + plot.w, rowY + rowH); ctx.stroke();
+    const color = s.color || [BLUE, BLUE_2, "#64748b", "#0f172a"][idx % 4];
+    ctx.fillStyle = color;
+    ctx.fillRect(plot.x + 8, rowY + rowH / 2 - 4, 12, 8);
+    text(ctx, s.name, plot.x + 27, rowY + rowH / 2, { size: 16, color: INK, weight: 650 });
+    text(ctx, dateShort(last.d), plot.x + labelW - 8, rowY + rowH / 2, {
+      size: 13, color: MUTED, align: "right", mono: true,
+    });
+    const stats = [last, max, min];
+    stats.forEach((point, i) => {
+      text(ctx, num(point.v, digits), plot.x + labelW + valueW * (i + 1) - 8, rowY + rowH / 2, {
+        size: 16, color: i === 0 ? INK : MUTED, weight: i === 0 ? 700 : 400,
+        align: "right", mono: true,
       });
+    });
   });
+  const chartTop = plot.y + summaryH + 16;
+  const area = { x: plot.x, y: chartTop, w: plot.w, h: Math.max(72, plot.y + plot.h - chartTop - 16) };
   const dates = valid.flatMap((s) => s.points.map((p) => p.d)).sort();
   const minD = dates[0], maxD = dates[dates.length - 1];
   const t0 = new Date(`${minD}T00:00:00Z`).getTime(), t1 = new Date(`${maxD}T00:00:00Z`).getTime();
@@ -407,7 +490,7 @@ function drawLines(ctx, plot, lines, unit) {
   ctx.strokeStyle = LINE; ctx.lineWidth = 1;
   for (let i = 0; i < 3; i++) {
     const yy = area.y + i * area.h / 2; ctx.beginPath(); ctx.moveTo(area.x, yy); ctx.lineTo(area.x + area.w, yy); ctx.stroke();
-    text(ctx, num(hi - i * (hi - lo) / 2, unit === "억원" ? 0 : unit === "%" ? 3 : 1), area.x - 7, yy, { size: 14, color: MUTED, align: "right", mono: true });
+    text(ctx, num(hi - i * (hi - lo) / 2, digits), area.x - 7, yy, { size: 15, color: MUTED, align: "right", mono: true });
   }
   valid.forEach((s, idx) => {
     ctx.strokeStyle = s.color || [BLUE, BLUE_2, "#94a3b8", "#0f172a"][idx % 4]; ctx.lineWidth = idx === 0 ? 4 : 3;
@@ -422,8 +505,8 @@ function drawLines(ctx, plot, lines, unit) {
       ctx.fillStyle = fill; ctx.fill(); ctx.strokeStyle = s.color || BLUE; ctx.lineWidth = 2; ctx.stroke();
     }
   });
-  text(ctx, dateShort(minD), area.x, area.y + area.h + 14, { size: 14, color: MUTED });
-  text(ctx, dateShort(maxD), area.x + area.w, area.y + area.h + 14, { size: 14, color: MUTED, align: "right" });
+  text(ctx, dateShort(minD), area.x, area.y + area.h + 14, { size: 15, color: MUTED, mono: true });
+  text(ctx, dateShort(maxD), area.x + area.w, area.y + area.h + 14, { size: 15, color: MUTED, align: "right", mono: true });
 }
 
 function drawBars(ctx, plot, rows, unit) {
@@ -481,17 +564,17 @@ function creditComparison(state, labels) {
   return {
     categories: labels.map((l) => l.replace("특수은행채", "산금채").replace("특수채", "공사채").replace(" 3년", "")),
     series: [
-      ["현재", BLUE], ["전주", BLUE_2], ["전월", "#c7d5ff"],
-    ].map(([name, color], i) => ({
-      name, color, values: labels.map((label) => targets.length ? atOrBefore(bpPoints(state, label), targets[i]) : null),
+      ["전월", "#c7d5ff", 2], ["전주", BLUE_2, 1], ["현재", BLUE, 0],
+    ].map(([name, color, targetIndex]) => ({
+      name, color, values: labels.map((label) => targets.length ? atOrBefore(bpPoints(state, label), targets[targetIndex]) : null),
     })),
-    valueLabels: { type: "series", index: 0 },
+    valueLabels: { type: "series", index: 2 },
   };
 }
 
 function pageTwo(state) {
   const { canvas, ctx } = canvasPage();
-  header(ctx, 2, state.asof, "발행 · 크레딧 스프레드 · 상대가치 · 등급간 스프레드");
+  header(ctx, 2, state.asof, "대신자산운용 채권운용본부");
   const matrixLabels = ["특수채 AAA 3년", "특수은행채 AAA 3년", "은행채 AAA 3년", "여전채 AA+ 3년", "여전채 AA- 3년", "회사채 AA- 3년"];
   chartCard(ctx, {
     x: 85, y: 224, w: 1072, h: 430, title: "월별 순발행", unit: "억원",
@@ -499,20 +582,20 @@ function pageTwo(state) {
   });
   chartCard(ctx, {
     x: 1182, y: 224, w: 1072, h: 430, title: "크레딧 스프레드", unit: "bp",
-    grouped: creditComparison(state, matrixLabels), note: "현재 · 전주 · 전월",
+    grouped: creditComparison(state, matrixLabels), note: "전월 · 전주 · 현재",
   });
 
   const panels = [];
-  panels.push({ title: "2년 스프레드-1", unit: "bp", series: [
+  panels.push({ title: "2년 스프레드 (공사·산금·은행)", unit: "bp", series: [
     ["공사채 AAA", "특수채 AAA 2년"], ["산금채", "특수은행채 AAA 2년"], ["은행채", "은행채 AAA 2년"],
   ].map(([name, l], i) => ({ name, points: bpPoints(state, l), color: [BLUE, BLUE_2, "#64748b"][i] })) });
-  panels.push({ title: "2년 스프레드-2", unit: "bp", series: [
+  panels.push({ title: "2년 스프레드 (여전·회사)", unit: "bp", series: [
     ["여전 AA+", "여전채 AA+ 2년"], ["여전 AA-", "여전채 AA- 2년"], ["회사 AA-", "회사채 AA- 2년"],
   ].map(([name, l], i) => ({ name, points: bpPoints(state, l), color: [BLUE, BLUE_2, "#64748b"][i] })) });
-  panels.push({ title: "3년 스프레드-1", unit: "bp", series: [
+  panels.push({ title: "3년 스프레드 (공사·산금·은행)", unit: "bp", series: [
     ["공사채 AAA", "특수채 AAA 3년"], ["산금채", "특수은행채 AAA 3년"], ["은행채", "은행채 AAA 3년"],
   ].map(([name, l], i) => ({ name, points: bpPoints(state, l), color: [BLUE, BLUE_2, "#64748b"][i] })) });
-  panels.push({ title: "3년 스프레드-2", unit: "bp", series: [
+  panels.push({ title: "3년 스프레드 (여전·회사)", unit: "bp", series: [
     ["여전 AA+", "여전채 AA+ 3년"], ["여전 AA-", "여전채 AA- 3년"], ["회사 AA-", "회사채 AA- 3년"],
   ].map(([name, l], i) => ({ name, points: bpPoints(state, l), color: [BLUE, BLUE_2, "#64748b"][i] })) });
   panels.push({ title: "은행-특수 / 여전-회사 2년", unit: "bp", series: [
@@ -579,7 +662,9 @@ function pdfFromJpegs(images) {
 export async function buildWeeklyReportPdfBlob(state) {
   if (!state?.series?.size) throw new Error("채권 데이터가 아직 로드되지 않았습니다.");
   if (document.fonts?.ready) await document.fonts.ready;
-  const pages = [pageOne(state), pageTwo(state)];
+  const overrides = await loadVerifiedMarketOverrides();
+  const reportState = applyVerifiedMarketOverrides(state, overrides);
+  const pages = [pageOne(reportState), pageTwo(reportState)];
   const jpgs = pages.map((c) => bytesFromDataUrl(c.toDataURL("image/jpeg", 0.99)));
   return new Blob([pdfFromJpegs(jpgs)], { type: "application/pdf" });
 }

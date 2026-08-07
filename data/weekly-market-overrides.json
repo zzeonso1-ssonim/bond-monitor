@@ -1,0 +1,40 @@
+{
+  "verified_at": "2026-08-07T11:10:22+09:00",
+  "method": "public-page-manual-cross-check",
+  "price_basis": "previous-close",
+  "max_difference_bp": 2,
+  "rows": [
+    {
+      "symbol": "UST2Y",
+      "trade_date": "2026-08-06",
+      "value": 4.247,
+      "primary": {
+        "name": "Investing.com Historical Data",
+        "url": "https://www.investing.com/rates-bonds/u.s.-2-year-bond-yield-historical-data",
+        "value": 4.247
+      },
+      "check": {
+        "name": "TradingView",
+        "url": "https://www.tradingview.com/symbols/TVC-US02Y/",
+        "value": 4.247,
+        "difference_bp": 0.0
+      }
+    },
+    {
+      "symbol": "AU10Y",
+      "trade_date": "2026-08-06",
+      "value": 4.978,
+      "primary": {
+        "name": "Investing.com Historical Data",
+        "url": "https://www.investing.com/rates-bonds/australia-10-year-bond-yield-historical-data",
+        "value": 4.978
+      },
+      "check": {
+        "name": "TradingView",
+        "url": "https://www.tradingview.com/symbols/TVC-AU10Y/",
+        "value": 4.983,
+        "difference_bp": 0.5
+      }
+    }
+  ]
+}
