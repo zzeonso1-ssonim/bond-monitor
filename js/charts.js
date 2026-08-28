@@ -577,10 +577,11 @@ export function dualLineChart(container, data, opts = {}) {
   }
 
   const stride = Math.max(1, Math.ceil(dates.length / 8));
+  const singleMonth = dates[0]?.slice(0, 7) === dates[dates.length - 1]?.slice(0, 7);
   dates.forEach((date, i) => {
     if (i % stride && i !== dates.length - 1) return;
     const label = el("text", { x: x(i), y: H - 8, "text-anchor": "middle", "font-size": 11, fill: "var(--muted)" });
-    label.textContent = fmtDateShort(date);
+    label.textContent = singleMonth ? `${+date.slice(5, 7)}.${date.slice(8, 10)}` : fmtDateShort(date);
     svg.appendChild(label);
   });
   svg.appendChild(el("line", { x1: M.l, x2: W - M.r, y1: H - M.b, y2: H - M.b, stroke: "var(--baseline)", "stroke-width": 1 }));
