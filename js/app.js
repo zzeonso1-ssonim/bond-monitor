@@ -1393,7 +1393,7 @@ function renderForeignBalance(root) {
 }
 
 
-/* 수급동향 탭의 '선물 수급' 블록 — 국채선물 근월물 표 + 외국인 순매수(주간 타일·연초 누적 차트) */
+/* 수급동향 탭의 '선물 수급' 블록 — 국채선물 근월물 표 + 외국인 순매수(주간 타일·연초/월간 누적 차트) */
 function renderFlowsFutures(root) {
   // 선물 수급 1) 국채선물 시세 — 최신 영업일, prod 별 근월물(거래량 최대). 주간변동은 같은 종목코드의 5영업일 전 종가 대비
   const futBody = $("#fl-fut", root);
@@ -1442,7 +1442,7 @@ function renderFlowsFutures(root) {
     if (!futBody.children.length) hintRow(futBody, 8, "데이터 적재 중");
   }
 
-  // 선물 수급 2) 외국인 순매수 — 일별(계약) 타일 + 연초 누적 라인차트
+  // 선물 수급 2) 외국인 순매수 — 일별(계약) 타일 + 연초/월간 누적 라인차트
   {
     const bySym = new Map();
     for (const r of S.futFrg) {
@@ -1450,7 +1450,6 @@ function renderFlowsFutures(root) {
       bySym.get(r.symbol).push(r); // trade_date 오름차순 로드
     }
     const tiles = $("#fl-frg-tiles", root);
-    const chartSeries = [];
     const defs = [
       { sym: "KTB3F_FRG", name: "3년 국채선물", cssVar: "--series-1" },
       { sym: "KTB10F_FRG", name: "10년 국채선물", cssVar: "--series-6" },
@@ -1461,10 +1460,7 @@ function renderFlowsFutures(root) {
       if (!rows.length) continue;
       hasAny = true;
       const last = rows[rows.length - 1];
-      let cum = 0;
-      const points = rows.map((r) => ({ d: r.trade_date, v: (cum += r.value) }));
-      chartSeries.push({ name: def.name, cssVar: def.cssVar, points });
-      // 주간 = 최근 5영업일 순매수 합 (연초 누적은 차트로만)
+      // 주간 = 최근 5영업일 순매수 합 (연초/월간 누적은 차트로만)
       const wk = rows.slice(-5).reduce((s, r) => s + r.value, 0);
       const tile = document.createElement("div");
       tile.className = "tile";
@@ -1501,7 +1497,38 @@ function renderFlowsFutures(root) {
           `bond-spread-system/tools 의 북마클릿·백필 스크립트로 갱신)`;
         sub.appendChild(warn);
       }
-      lineChart($("#fl-frg-chart", root), chartSeries, { unit: "계약", digits: 0, zeroLine: true });
+      let period = "ytd";
+      const latestMonth = latest.slice(0, 7);
+      const drawCumulative = () => {
+        const chartSeries = [];
+        for (const def of defs) {
+          const allRows = bySym.get(def.sym) || [];
+          const rows = period === "mtd"
+            ? allRows.filter((r) => r.trade_date.startsWith(latestMonth))
+            : allRows;
+          if (!rows.length) continue;
+          let cum = 0;
+          chartSeries.push({
+            name: def.name,
+            cssVar: def.cssVar,
+            points: rows.map((r) => ({ d: r.trade_date, v: (cum += r.value) })),
+          });
+        }
+        $("#fl-frg-chart-title", root).textContent = period === "mtd"
+          ? `${Number(latest.slice(5, 7))}월 누적 순매수`
+          : "연초 이후 누적 순매수";
+        lineChart($("#fl-frg-chart", root), chartSeries, { unit: "계약", digits: 0, zeroLine: true });
+      };
+      $("#fl-frg-period", root).addEventListener("click", (e) => {
+        const btn = e.target.closest("button");
+        if (!btn) return;
+        period = btn.dataset.period;
+        for (const b of $("#fl-frg-period", root).querySelectorAll("button")) {
+          b.classList.toggle("active", b === btn);
+        }
+        drawCumulative();
+      });
+      drawCumulative();
     } else {
       const p = document.createElement("p");
       p.className = "hint";
@@ -1799,7 +1826,13 @@ function renderFlows() {
     <p class="section-sub" id="fl-frg-sub">KRX 파생 투자자별 거래실적 · 계약 수 기준</p>
     <div class="tile-row" id="fl-frg-tiles"></div>
     <div class="card">
-      <div class="card-head"><h2>연초 이후 누적 순매수</h2><span class="hint">계약</span></div>
+      <div class="card-head">
+        <h2 id="fl-frg-chart-title">연초 이후 누적 순매수</h2><span class="hint">계약</span><span class="spacer"></span>
+        <div class="seg" id="fl-frg-period">
+          <button data-period="ytd" class="active">연초</button>
+          <button data-period="mtd">월간</button>
+        </div>
+      </div>
       <div id="fl-frg-chart"></div>
     </div>
     <div class="section-title">국면별 누적 순매수 (통화정책 사이클)</div>
