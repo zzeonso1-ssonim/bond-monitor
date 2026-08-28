@@ -1740,6 +1740,20 @@ function renderFlows() {
   root.innerHTML = `
     <div class="section-title">자금·보유잔고 추이</div>
     <div class="card">
+      <div class="card-head"><h2>외국인 장외채권잔고·원/달러 환율 추이</h2><span class="hint">최근 12개월</span></div>
+      <div class="tile-row">
+        <div class="tile">
+          <div class="t-label" id="foreign-balance-date">최신</div>
+          <div class="t-value"><span id="foreign-balance-current">—</span><span class="unit">조원</span></div>
+        </div>
+        <div class="tile">
+          <div class="t-label">전월 대비</div><div class="t-value" id="foreign-balance-change">—</div>
+        </div>
+      </div>
+      <div id="foreign-balance-chart"></div>
+      <p class="hint">월말 잔고와 해당 월 마지막 영업일 환율 비교 · 좌축 잔고(조원), 우축 원/달러(원) · <a href="${FOREIGN_BALANCE_DEF.url}" target="_blank" rel="noopener">금융감독원·금투협 장외채권시장 동향 원자료 ↗</a></p>
+    </div>
+    <div class="card">
       <div class="card-head">
         <h2 id="liq-title">펀드 유형별 수탁고 비교</h2><span class="hint">조원</span><span class="spacer"></span>
         <div class="seg wrap" id="liq-seg"></div>
@@ -1756,20 +1770,6 @@ function renderFlows() {
         <a href="${LIQUIDITY_DEFS[0].url}" target="_blank" rel="noopener">주식형·채권형 FreeSIS 원자료 ↗</a>
         · <a href="${LIQUIDITY_DEFS[2].url}" target="_blank" rel="noopener">MMF FreeSIS 원자료 ↗</a>
       </p>
-    </div>
-    <div class="card">
-      <div class="card-head"><h2>외국인 장외채권잔고·원/달러 환율 추이</h2><span class="hint">최근 12개월</span></div>
-      <div class="tile-row">
-        <div class="tile">
-          <div class="t-label" id="foreign-balance-date">최신</div>
-          <div class="t-value"><span id="foreign-balance-current">—</span><span class="unit">조원</span></div>
-        </div>
-        <div class="tile">
-          <div class="t-label">전월 대비</div><div class="t-value" id="foreign-balance-change">—</div>
-        </div>
-      </div>
-      <div id="foreign-balance-chart"></div>
-      <p class="hint">월말 잔고와 해당 월 마지막 영업일 환율 비교 · 좌축 잔고(조원), 우축 원/달러(원) · <a href="${FOREIGN_BALANCE_DEF.url}" target="_blank" rel="noopener">금융감독원·금투협 장외채권시장 동향 원자료 ↗</a></p>
     </div>
     <div class="section-title">현물 수급 (장외 투자자별 거래)</div>
     <p class="section-sub" id="fl-sub"></p>
