@@ -1258,9 +1258,9 @@ const LIQUIDITY_DEFS = [
 ];
 
 const FOREIGN_BALANCE_DEF = {
-  symbol: "FOREIGN_BOND_BAL",
-  name: "외국인 장외채권잔고",
-  url: "https://www.kofia.or.kr/brd/m_211/list.do?srchTp=0&srchWord=%EC%9E%A5%EC%99%B8%EC%B1%84%EA%B6%8C%EC%8B%9C%EC%9E%A5%20%EB%8F%99%ED%96%A5",
+  symbol: "FOREIGN_LISTED_BOND_BAL",
+  name: "외국인 상장채권잔고",
+  url: "https://www.fss.or.kr/fss/bbs/B0000192/list.do?menuNo=200224",
   cssVar: "--series-6",
 };
 
@@ -1368,23 +1368,24 @@ function renderLiquidity(root) {
 }
 
 function renderForeignBalance(root) {
-  const points = monthlyMarketPoints(FOREIGN_BALANCE_DEF.symbol);
+  const points = marketPoints(FOREIGN_BALANCE_DEF.symbol);
   const last = points[points.length - 1] || null;
   const prev = points.length > 1 ? points[points.length - 2] : null;
   $("#foreign-balance-current", root).textContent = last ? last.v.toFixed(1) : "—";
-  $("#foreign-balance-date", root).textContent = last ? `최신 ${last.d.slice(0, 7)}` : "최신";
+  $("#foreign-balance-date", root).textContent = last ? `최신 ${last.d}` : "최신";
   const change = last && prev ? last.v - prev.v : null;
   const changeEl = $("#foreign-balance-change", root);
   changeEl.textContent = change == null ? "—" : `${fmtSigned(change, 1)}조원`;
   changeEl.className = "t-value";
   if (change > 0) changeEl.classList.add("delta-up");
   else if (change < 0) changeEl.classList.add("delta-dn");
-  const balancePoints = points.slice(-12);
-  const fxByMonth = new Map();
-  for (const point of marketPoints("USDKRW")) fxByMonth.set(point.d.slice(0, 7), point.v);
+  const latestMonth = last?.d.slice(0, 7) || "";
+  const balancePoints = points.filter((point) => point.d.startsWith(latestMonth));
+  const fxByDate = new Map();
+  for (const point of marketPoints("USDKRW")) fxByDate.set(point.d, point.v);
   const fxPoints = balancePoints
-    .filter((point) => fxByMonth.has(point.d.slice(0, 7)))
-    .map((point) => ({ d: point.d, v: fxByMonth.get(point.d.slice(0, 7)) }));
+    .filter((point) => fxByDate.has(point.d))
+    .map((point) => ({ d: point.d, v: fxByDate.get(point.d) }));
   dualLineChart($("#foreign-balance-chart", root), {
     left: { name: "잔고(좌)", cssVar: FOREIGN_BALANCE_DEF.cssVar, points: balancePoints },
     right: { name: "원/달러(우)", cssVar: "--series-1", points: fxPoints },
@@ -1740,18 +1741,18 @@ function renderFlows() {
   root.innerHTML = `
     <div class="section-title">자금·보유잔고 추이</div>
     <div class="card">
-      <div class="card-head"><h2>외국인 장외채권잔고·원/달러 환율 추이</h2><span class="hint">최근 12개월</span></div>
+      <div class="card-head"><h2>외국인 채권잔고·원/달러 환율 일간 추이</h2><span class="hint">당월 일별</span></div>
       <div class="tile-row">
         <div class="tile">
           <div class="t-label" id="foreign-balance-date">최신</div>
           <div class="t-value"><span id="foreign-balance-current">—</span><span class="unit">조원</span></div>
         </div>
         <div class="tile">
-          <div class="t-label">전월 대비</div><div class="t-value" id="foreign-balance-change">—</div>
+          <div class="t-label">전일 대비</div><div class="t-value" id="foreign-balance-change">—</div>
         </div>
       </div>
       <div id="foreign-balance-chart"></div>
-      <p class="hint">월말 잔고와 해당 월 마지막 영업일 환율 비교 · 좌축 잔고(조원), 우축 원/달러(원) · <a href="${FOREIGN_BALANCE_DEF.url}" target="_blank" rel="noopener">금융감독원·금투협 장외채권시장 동향 원자료 ↗</a></p>
+      <p class="hint">금감원 상장채권 결제일 기준 일별 잔고와 같은 날 환율 비교 · 좌축 잔고(조원), 우축 원/달러(원) · <a href="${FOREIGN_BALANCE_DEF.url}" target="_blank" rel="noopener">금융감독원 일일 금융시장 동향 원자료 ↗</a></p>
     </div>
     <div class="card">
       <div class="card-head">

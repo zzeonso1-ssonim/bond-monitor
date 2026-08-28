@@ -97,10 +97,10 @@ export async function loadMarket() {
   const [recent, yearMarket, liquidity] = await Promise.all([
     fetchPaged(
       `market_daily?select=trade_date,symbol,value&trade_date=gte.${recentFrom}` +
-        "&symbol=not.in.(USDKRW,UST2Y,UST10Y,FUND_AUM,FUND_STOCK_AUM,FUND_BOND_AUM,MMF_AUM,FOREIGN_BOND_BAL)&order=trade_date.desc"
+        "&symbol=not.in.(USDKRW,UST2Y,UST10Y,FUND_AUM,FUND_STOCK_AUM,FUND_BOND_AUM,MMF_AUM,FOREIGN_BOND_BAL,FOREIGN_LISTED_BOND_BAL)&order=trade_date.desc"
     ),
     fetchPaged(
-      "market_daily?select=trade_date,symbol,value&symbol=in.(USDKRW,UST2Y,UST10Y)" +
+      "market_daily?select=trade_date,symbol,value&symbol=in.(USDKRW,UST2Y,UST10Y,FOREIGN_LISTED_BOND_BAL)" +
         `&trade_date=gte.${treasuryFrom}&order=trade_date.desc`
     ),
     fetchPaged(
