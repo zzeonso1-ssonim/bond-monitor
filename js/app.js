@@ -1838,14 +1838,16 @@ function renderFlows() {
   // 합계(전 채권종류) 일별 시계열 — 타일·차트 공용
   const sumSeries = net.filter((r) => r.bond_class === "합계");
 
-  // 타일: 주요 투자자 당일 순매수 + 20영업일 누적
+  // 타일: 주요 투자자 당일 순매수 + 기준일이 속한 달의 월초 이후 누적
   const tiles = $("#fl-tiles", root);
-  const last20 = new Set(dates.slice(-20));
+  const latestMonth = latest.slice(0, 7);
+  const monthDates = new Set(dates.filter((d) => d.startsWith(latestMonth)));
+  const monthLabel = `${Number(latest.slice(5, 7))}월 누적 `;
   for (const inv of FLOW_INVESTORS.filter((i) => i.chart)) {
     const cur = byClassToday.get("합계")?.[inv.key] ?? null;
     let cum = 0, has = false;
     for (const r of sumSeries) {
-      if (last20.has(r.trade_date) && r[inv.key] != null) { cum += r[inv.key]; has = true; }
+      if (monthDates.has(r.trade_date) && r[inv.key] != null) { cum += r[inv.key]; has = true; }
     }
     const tile = document.createElement("div");
     tile.className = "tile";
@@ -1863,7 +1865,7 @@ function renderFlows() {
     }
     const del = document.createElement("div");
     del.className = "t-delta";
-    del.append("20일 누적 ", intDeltaSpan(has ? cum : null));
+    del.append(monthLabel, intDeltaSpan(has ? cum : null));
     tile.append(lab, val, del);
     tiles.appendChild(tile);
   }
