@@ -502,10 +502,198 @@ export function regimeRangeChart(container, rows, opts = {}) {
   container.appendChild(lg);
 }
 
+// 명시적으로 서로 다른 단위를 비교하는 두 시계열용 이축 라인 차트.
+// data: { left:{name, cssVar, points}, right:{name, cssVar, points} }
+export function dualLineChart(container, data, opts = {}) {
+  const W = 960, H = 300;
+  const M = { l: 54, r: 54, t: 12, b: 26 };
+  const left = data.left, right = data.right;
+  const leftUnit = opts.leftUnit || "";
+  const rightUnit = opts.rightUnit || "";
+  const leftDigits = opts.leftDigits ?? 1;
+  const rightDigits = opts.rightDigits ?? 1;
+
+  container.textContent = "";
+  const wrap = document.createElement("div");
+  wrap.className = "chart-wrap";
+  const svg = el("svg", { viewBox: `0 0 ${W} ${H}`, role: "img" });
+  wrap.appendChild(svg);
+  container.appendChild(wrap);
+
+  if (!left?.points?.length || !right?.points?.length) {
+    const p = document.createElement("p");
+    p.className = "hint";
+    p.textContent = "표시할 데이터가 없습니다.";
+    container.appendChild(p);
+    return;
+  }
+  addDownloadButton(wrap, svg, container);
+
+  const dates = [...new Set([
+    ...left.points.map((p) => p.d),
+    ...right.points.map((p) => p.d),
+  ])].sort();
+  const values = (series) => {
+    const byDate = new Map(series.points.map((p) => [p.d, p.v]));
+    return dates.map((d) => byDate.has(d) ? byDate.get(d) : null);
+  };
+  const leftValues = values(left), rightValues = values(right);
+  const domain = (arr) => {
+    const live = arr.filter((v) => v != null);
+    let lo = Math.min(...live), hi = Math.max(...live);
+    const pad = (hi - lo || Math.max(Math.abs(hi), 1) * 0.02) * 0.08;
+    return [lo - pad, hi + pad];
+  };
+  const [leftLo, leftHi] = domain(leftValues);
+  const [rightLo, rightHi] = domain(rightValues);
+  const leftTicks = niceTicks(leftLo, leftHi, 5);
+  const rightTicks = niceTicks(rightLo, rightHi, 5);
+  const labelWidth = (ticks, digits) => Math.max(...ticks.map((t) =>
+    t.toLocaleString(undefined, { maximumFractionDigits: digits }).length
+  )) * 6.6 + 12;
+  M.l = Math.max(M.l, labelWidth(leftTicks, leftDigits));
+  M.r = Math.max(M.r, labelWidth(rightTicks, rightDigits));
+
+  const x = (i) => M.l + (i / Math.max(dates.length - 1, 1)) * (W - M.l - M.r);
+  const yLeft = (v) => H - M.b - ((v - leftLo) / (leftHi - leftLo)) * (H - M.t - M.b);
+  const yRight = (v) => H - M.b - ((v - rightLo) / (rightHi - rightLo)) * (H - M.t - M.b);
+
+  const leftLabel = el("text", { x: M.l, y: 10, "text-anchor": "start", "font-size": 11, fill: "var(--muted)" });
+  leftLabel.textContent = `좌축 (${leftUnit})`;
+  const rightLabel = el("text", { x: W - M.r, y: 10, "text-anchor": "end", "font-size": 11, fill: "var(--muted)" });
+  rightLabel.textContent = `우축 (${rightUnit})`;
+  svg.append(leftLabel, rightLabel);
+
+  for (const tick of leftTicks) {
+    svg.appendChild(el("line", { x1: M.l, x2: W - M.r, y1: yLeft(tick), y2: yLeft(tick), stroke: "var(--grid)", "stroke-width": 1 }));
+    const label = el("text", { x: M.l - 8, y: yLeft(tick) + 4, "text-anchor": "end", "font-size": 11, fill: "var(--muted)" });
+    label.textContent = tick.toLocaleString(undefined, { maximumFractionDigits: leftDigits });
+    svg.appendChild(label);
+  }
+  for (const tick of rightTicks) {
+    const label = el("text", { x: W - M.r + 8, y: yRight(tick) + 4, "text-anchor": "start", "font-size": 11, fill: "var(--muted)" });
+    label.textContent = tick.toLocaleString(undefined, { maximumFractionDigits: rightDigits });
+    svg.appendChild(label);
+  }
+
+  const stride = Math.max(1, Math.ceil(dates.length / 8));
+  dates.forEach((date, i) => {
+    if (i % stride && i !== dates.length - 1) return;
+    const label = el("text", { x: x(i), y: H - 8, "text-anchor": "middle", "font-size": 11, fill: "var(--muted)" });
+    label.textContent = fmtDateShort(date);
+    svg.appendChild(label);
+  });
+  svg.appendChild(el("line", { x1: M.l, x2: W - M.r, y1: H - M.b, y2: H - M.b, stroke: "var(--baseline)", "stroke-width": 1 }));
+
+  const plotted = [
+    { series: left, values: leftValues, y: yLeft },
+    { series: right, values: rightValues, y: yRight },
+  ];
+  for (const item of plotted) {
+    let path = "", started = false;
+    item.values.forEach((value, i) => {
+      if (value == null) { started = false; return; }
+      path += `${started ? "L" : "M"}${x(i).toFixed(1)},${item.y(value).toFixed(1)}`;
+      started = true;
+    });
+    svg.appendChild(el("path", {
+      d: path, fill: "none", stroke: `var(${item.series.cssVar})`,
+      "stroke-width": 2, "stroke-linejoin": "round", "stroke-linecap": "round",
+    }));
+    for (let i = item.values.length - 1; i >= 0; i--) {
+      if (item.values[i] == null) continue;
+      svg.appendChild(el("circle", { cx: x(i), cy: item.y(item.values[i]), r: 5.5, fill: "var(--surface-1)" }));
+      svg.appendChild(el("circle", { cx: x(i), cy: item.y(item.values[i]), r: 4, fill: `var(${item.series.cssVar})` }));
+      break;
+    }
+  }
+
+  const cross = el("line", { y1: M.t, y2: H - M.b, stroke: "var(--baseline)", "stroke-width": 1, visibility: "hidden" });
+  svg.appendChild(cross);
+  const dots = plotted.map((item) => {
+    const group = el("g", { visibility: "hidden" });
+    group.appendChild(el("circle", { r: 6, fill: "var(--surface-1)" }));
+    group.appendChild(el("circle", { r: 4, fill: `var(${item.series.cssVar})` }));
+    svg.appendChild(group);
+    return group;
+  });
+  const tip = document.createElement("div");
+  tip.className = "viz-tooltip";
+  const tipDate = document.createElement("div");
+  tipDate.className = "tt-date";
+  tip.appendChild(tipDate);
+  const tipValues = plotted.map((item) => {
+    const row = document.createElement("div");
+    row.className = "tt-row";
+    const key = document.createElement("span");
+    key.className = "tt-key";
+    key.style.borderTopColor = `var(${item.series.cssVar})`;
+    const name = document.createElement("span");
+    name.className = "tt-name";
+    name.textContent = item.series.name;
+    const value = document.createElement("span");
+    value.className = "tt-val";
+    row.append(key, name, value);
+    tip.appendChild(row);
+    return value;
+  });
+  wrap.appendChild(tip);
+
+  function onLeave() {
+    cross.setAttribute("visibility", "hidden");
+    dots.forEach((dot) => dot.setAttribute("visibility", "hidden"));
+    tip.style.display = "none";
+  }
+  svg.addEventListener("pointermove", (event) => {
+    const rect = svg.getBoundingClientRect();
+    const px = ((event.clientX - rect.left) / rect.width) * W;
+    if (px < M.l - 10 || px > W - M.r + 10) { onLeave(); return; }
+    const i = Math.max(0, Math.min(dates.length - 1,
+      Math.round(((px - M.l) / (W - M.l - M.r)) * (dates.length - 1))));
+    cross.setAttribute("x1", x(i));
+    cross.setAttribute("x2", x(i));
+    cross.setAttribute("visibility", "visible");
+    tipDate.textContent = fmtDateFull(dates[i]);
+    plotted.forEach((item, j) => {
+      const value = item.values[i];
+      if (value == null) {
+        dots[j].setAttribute("visibility", "hidden");
+        tipValues[j].textContent = "—";
+        return;
+      }
+      dots[j].setAttribute("transform", `translate(${x(i)},${item.y(value)})`);
+      dots[j].setAttribute("visibility", "visible");
+      const digits = j === 0 ? leftDigits : rightDigits;
+      const unit = j === 0 ? leftUnit : rightUnit;
+      tipValues[j].textContent = `${value.toLocaleString(undefined, { minimumFractionDigits: digits, maximumFractionDigits: digits })}${unit}`;
+    });
+    tip.style.display = "block";
+    const width = wrap.getBoundingClientRect().width;
+    const tx = (x(i) / W) * width;
+    const flip = tx > width * 0.62;
+    tip.style.left = flip ? "auto" : `${tx + 14}px`;
+    tip.style.right = flip ? `${width - tx + 14}px` : "auto";
+    tip.style.top = "10px";
+  });
+  svg.addEventListener("pointerleave", onLeave);
+
+  const legend = document.createElement("div");
+  legend.className = "legend";
+  for (const item of plotted) {
+    const entry = document.createElement("span");
+    entry.className = "lg";
+    const key = document.createElement("span");
+    key.className = "lg-key";
+    key.style.borderTopColor = `var(${item.series.cssVar})`;
+    const name = document.createElement("span");
+    name.textContent = item.series.name;
+    entry.append(key, name);
+    legend.appendChild(entry);
+  }
+  container.appendChild(legend);
+}
+
 // ── 이축 커브-스프레드 차트 — 금리 두 개와 그 차이 전용 ──
-// 주의: 이 프로젝트에서 이축(dual-axis)은 이 파생 관계에만 허용한다.
-// 좌축(금리 레벨 %)과 우축(그 차이 bp)이 직접 연결되므로 예외적으로 쓰는 것 —
-// 다른 차트에 이축을 확산시키지 말 것.
 // data: { a:{name, points:[{d,v}]}, b:{name, points}, spread:{name, points} }
 // 색 고정: A=--series-1(파랑), B=--series-2(녹색) — 표의 A/B 뱃지 색과 일치, 스프레드 영역=--series-6 wash
 export function dualSpreadChart(container, data, opts = {}) {

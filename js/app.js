@@ -12,7 +12,7 @@ import {
   loadInvestorFlows, loadFuturesForeign, loadFuturesForeignRange,
   loadIssueStats, loadIssueMonthly,
 } from "./api.js";
-import { lineChart, regimeRangeChart, dualSpreadChart, barChart } from "./charts.js";
+import { lineChart, regimeRangeChart, dualLineChart, dualSpreadChart, barChart } from "./charts.js";
 import { downloadWeeklyReportPdf } from "./report-pdf.js";
 
 const $ = (sel, root = document) => root.querySelector(sel);
@@ -1261,7 +1261,7 @@ const FOREIGN_BALANCE_DEF = {
   symbol: "FOREIGN_BOND_BAL",
   name: "외국인 장외채권잔고",
   url: "https://www.kofia.or.kr/brd/m_211/list.do?srchTp=0&srchWord=%EC%9E%A5%EC%99%B8%EC%B1%84%EA%B6%8C%EC%8B%9C%EC%9E%A5%20%EB%8F%99%ED%96%A5",
-  cssVar: "--series-3",
+  cssVar: "--series-6",
 };
 
 // 서로 다른 빈도의 펀드 시계열을 같은 월말 축으로 맞춘다.
@@ -1379,9 +1379,16 @@ function renderForeignBalance(root) {
   changeEl.className = "t-value";
   if (change > 0) changeEl.classList.add("delta-up");
   else if (change < 0) changeEl.classList.add("delta-dn");
-  lineChart($("#foreign-balance-chart", root), [
-    { name: FOREIGN_BALANCE_DEF.name, cssVar: FOREIGN_BALANCE_DEF.cssVar, points },
-  ], { unit: "조원", digits: 1, showLegend: true });
+  const balancePoints = points.slice(-12);
+  const fxByMonth = new Map();
+  for (const point of marketPoints("USDKRW")) fxByMonth.set(point.d.slice(0, 7), point.v);
+  const fxPoints = balancePoints
+    .filter((point) => fxByMonth.has(point.d.slice(0, 7)))
+    .map((point) => ({ d: point.d, v: fxByMonth.get(point.d.slice(0, 7)) }));
+  dualLineChart($("#foreign-balance-chart", root), {
+    left: { name: "잔고(좌)", cssVar: FOREIGN_BALANCE_DEF.cssVar, points: balancePoints },
+    right: { name: "원/달러(우)", cssVar: "--series-1", points: fxPoints },
+  }, { leftUnit: "조원", rightUnit: "원", leftDigits: 1, rightDigits: 1 });
 }
 
 
@@ -1751,7 +1758,7 @@ function renderFlows() {
       </p>
     </div>
     <div class="card">
-      <div class="card-head"><h2>외국인 장외채권잔고 추이</h2><span class="hint">조원</span></div>
+      <div class="card-head"><h2>외국인 장외채권잔고·원/달러 환율 추이</h2><span class="hint">최근 12개월</span></div>
       <div class="tile-row">
         <div class="tile">
           <div class="t-label" id="foreign-balance-date">최신</div>
@@ -1762,7 +1769,7 @@ function renderFlows() {
         </div>
       </div>
       <div id="foreign-balance-chart"></div>
-      <p class="hint"><a href="${FOREIGN_BALANCE_DEF.url}" target="_blank" rel="noopener">금융감독원·금투협 장외채권시장 동향 원자료 ↗</a></p>
+      <p class="hint">월말 잔고와 해당 월 마지막 영업일 환율 비교 · 좌축 잔고(조원), 우축 원/달러(원) · <a href="${FOREIGN_BALANCE_DEF.url}" target="_blank" rel="noopener">금융감독원·금투협 장외채권시장 동향 원자료 ↗</a></p>
     </div>
     <div class="section-title">현물 수급 (장외 투자자별 거래)</div>
     <p class="section-sub" id="fl-sub"></p>
