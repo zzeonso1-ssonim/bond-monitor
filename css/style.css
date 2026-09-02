@@ -224,6 +224,12 @@ select.ctl {
 }
 .ctl-btn:hover { color: var(--text-primary); background: var(--accent-wash); }
 .multi-pick button.active::before { content: "✓ "; }
+table.data tbody tr.maturity-pick { cursor: pointer; }
+table.data tbody tr.maturity-pick:hover { background: color-mix(in srgb, var(--accent-wash) 65%, transparent); }
+table.data tbody tr.maturity-pick.selected {
+  background: var(--accent-wash);
+  box-shadow: inset 3px 0 0 var(--accent);
+}
 
 /* ── 표 ── */
 .table-scroll { overflow-x: auto; }

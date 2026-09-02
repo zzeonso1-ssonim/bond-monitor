@@ -1945,6 +1945,11 @@ function renderFlows() {
       <div class="card-head">
         <h2 id="fl-chart-title">월간 순매수 추이</h2><span class="hint">조원 · 최근 36개월</span>
       </div>
+      <p class="hint">만기구간 버튼이나 위 표의 행을 눌러 최대 6개 구간을 동시에 비교할 수 있습니다.</p>
+      <div class="controls">
+        <div class="seg wrap multi-pick" id="fl-bucket-picks" aria-label="차트 만기구간 선택"></div>
+        <button class="ctl-btn" id="fl-bucket-reset" type="button">전체만 보기</button>
+      </div>
       <div id="fl-chart"></div>
     </div>
     <div class="section-title">투자주체·채권종류 비교</div>
@@ -2027,6 +2032,40 @@ function renderFlows() {
     }
     const bucketOrder = ["0~6M", "6M~1Y", "1~2Y", "2~3Y", "3~5Y", "5~7Y",
       "7~10Y", "10~15Y", "15~20Y", "20~30Y", "30Y+"];
+    const chartBucketOrder = ["전체", ...bucketOrder];
+    const selectedBuckets = new Set(["전체"]);
+    const bucketPicks = $("#fl-bucket-picks", root);
+    const bucketButtons = new Map();
+    const syncBucketSelection = () => {
+      for (const [bucket, button] of bucketButtons) {
+        const active = selectedBuckets.has(bucket);
+        button.classList.toggle("active", active);
+        button.setAttribute("aria-pressed", active ? "true" : "false");
+      }
+      for (const row of $("#fl-maturity", root).querySelectorAll("tr[data-bucket]")) {
+        row.classList.toggle("selected", selectedBuckets.has(row.dataset.bucket));
+      }
+    };
+    const toggleBucket = (bucket) => {
+      if (selectedBuckets.has(bucket)) {
+        if (selectedBuckets.size === 1) return;
+        selectedBuckets.delete(bucket);
+      } else {
+        if (selectedBuckets.size >= 6) return;
+        selectedBuckets.add(bucket);
+      }
+      syncBucketSelection();
+      drawSpotChart();
+    };
+    for (const bucket of chartBucketOrder) {
+      const button = document.createElement("button");
+      button.type = "button";
+      button.dataset.bucket = bucket;
+      button.textContent = bucket;
+      button.addEventListener("click", () => toggleBucket(bucket));
+      bucketButtons.set(bucket, button);
+      bucketPicks.appendChild(button);
+    }
     const toTn = (v) => Number(v) / 1e9;
     const signedTn = (v) => v == null ? "—" : `${v > 0 ? "+" : ""}${v.toFixed(3)}`;
     const makeTile = (label, value, detail) => {
@@ -2036,6 +2075,30 @@ function renderFlows() {
       const unit = document.createElement("span"); unit.className = "unit"; unit.textContent = "조원"; val.appendChild(unit);
       const sub = document.createElement("div"); sub.className = "t-delta"; sub.textContent = detail;
       tile.append(lab, val, sub); return tile;
+    };
+    const drawSpotChart = () => {
+      const rows = spot.filter((row) =>
+        row.investor === investorSel.value && row.market_scope === scopeSel.value);
+      const dates = [...new Set(rows.map((row) => row.trade_date))].sort().slice(-36);
+      const activeBuckets = chartBucketOrder.filter((bucket) => selectedBuckets.has(bucket));
+      const chartSeries = activeBuckets.map((bucket) => {
+        const values = new Map(rows.filter((row) => row.maturity_bucket === bucket)
+          .map((row) => [row.trade_date, toTn(row.net_buy_krw_thousand)]));
+        return {
+          name: bucket,
+          cssVar: SLOT_VARS[chartBucketOrder.indexOf(bucket) % SLOT_VARS.length],
+          values: dates.map((date) => values.get(date) ?? null),
+          points: dates.filter((date) => values.has(date)).map((date) => ({ d: date, v: values.get(date) })),
+        };
+      });
+      const selectionLabel = activeBuckets.length <= 3 ? activeBuckets.join(" · ") : `${activeBuckets.length}개 구간`;
+      $("#fl-chart-title", root).textContent = `${investorSel.value} · ${selectionLabel} 월간 순매수`;
+      if (chartSeries.length === 1) {
+        barChart($("#fl-chart", root), dates.map((date) => date.slice(2, 7).replace("-", "/")),
+          chartSeries, { unit: "조" });
+      } else {
+        lineChart($("#fl-chart", root), chartSeries, { unit: "조", digits: 3, zeroLine: true });
+      }
     };
     const drawSpot = () => {
     const rows = spot.filter((r) => r.investor === investorSel.value && r.market_scope === scopeSel.value);
@@ -2063,20 +2126,25 @@ function renderFlows() {
     const gross = detailRows.reduce((s, r) => s + Math.abs(r.value), 0);
     for (const r of [...detailRows].sort((a, b) => Math.abs(b.value) - Math.abs(a.value))) {
       const tr = document.createElement("tr");
+      tr.className = "maturity-pick";
+      tr.dataset.bucket = r.bucket;
+      tr.title = `${r.bucket} 시계열을 차트에 추가하거나 제거`;
+      tr.addEventListener("click", () => toggleBucket(r.bucket));
       for (const text of [r.bucket, signedTn(r.value), gross ? `${(Math.abs(r.value) / gross * 100).toFixed(1)}%` : "—", r.value > 0 ? "순매수" : r.value < 0 ? "순매도" : "중립"]) {
         const td = document.createElement("td"); td.textContent = text; tr.appendChild(td);
       }
       tbody.appendChild(tr);
     }
     table.appendChild(tbody); box.appendChild(table);
-
-    const totals = new Map(rows.filter((r) => r.maturity_bucket === "전체")
-      .map((r) => [r.trade_date, toTn(r.net_buy_krw_thousand)]));
-    const chartDates = dates.slice(-36);
-    $("#fl-chart-title", root).textContent = `${investorSel.value} 월간 순매수 추이`;
-    barChart($("#fl-chart", root), chartDates.map((d) => d.slice(2, 7).replace("-", "/")),
-      [{ name: "전체", cssVar: "--series-1", values: chartDates.map((d) => totals.get(d) ?? null) }], { unit: "조" });
+    syncBucketSelection();
+    drawSpotChart();
     };
+    $("#fl-bucket-reset", root).addEventListener("click", () => {
+      selectedBuckets.clear();
+      selectedBuckets.add("전체");
+      syncBucketSelection();
+      drawSpotChart();
+    });
     investorSel.addEventListener("change", drawSpot);
     scopeSel.addEventListener("change", drawSpot);
     drawSpot();
