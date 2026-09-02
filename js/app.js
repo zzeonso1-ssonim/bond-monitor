@@ -2,13 +2,14 @@
 import {
   MONITOR_GROUPS, MATRIX_GROUPS, XCURVE_DEFS, RV_DEFS,
   REGIME_LABELS, MARKET_SYMBOLS, MARKET_TABLE, SLOT_VARS,
+  FLOW_INVESTORS, FLOW_CLASSES,
   MPC_MEETINGS, MPC_MEETINGS_META, REGIME_FLOW_LEAD_MONTHS, REGIME_FLOW_POLICIES,
   REGIME_FLOW_GAP_MONTHS,
 } from "./config.js";
 import {
   loadSpreadSeries, loadMarket, loadRegimeStats, loadWebMeta,
   loadKrxFutures, loadDartOfferings, loadDartDetails,
-  loadInfomaxSpotFlows, loadFuturesForeign, loadFuturesForeignRange,
+  loadInvestorFlows, loadInfomaxSpotFlows, loadFuturesForeign, loadFuturesForeignRange,
   loadIssueStats, loadIssueMonthly,
 } from "./api.js";
 import { lineChart, regimeRangeChart, dualLineChart, dualSpreadChart, barChart } from "./charts.js";
@@ -20,7 +21,7 @@ const $ = (sel, root = document) => root.querySelector(sel);
 const S = {
   series: new Map(), market: new Map(),
   stats: { regime: new Map(), rv: new Map(), xcurve: new Map() },
-  futures: [], dart: [], dartDetails: [], spotFlows: [], futFrg: [], issue: [], issueMonthly: [],
+  futures: [], dart: [], dartDetails: [], flows: [], spotFlows: [], futFrg: [], issue: [], issueMonthly: [],
   regimeFrg: new Map(),        // 국면 bucket → 그 구간 외국인 선물 순매수 행 (lazy 캐시)
   asof: "",
 };
@@ -1762,6 +1763,137 @@ async function drawRegimeFutures(root) {
   tbody.appendChild(tot);
 }
 
+function renderInvestorComparison(root) {
+  const net = S.flows.filter((r) => r.trade_type === "순매수");
+  const matrixBox = $("#fl-matrix", root);
+  const chartBox = $("#fl-compare-chart", root);
+  if (!net.length) {
+    const p = document.createElement("p");
+    p.className = "hint";
+    p.textContent = "투자주체·채권종류 비교 데이터 적재 준비 중";
+    matrixBox.appendChild(p);
+    chartBox.textContent = "데이터 적재 준비 중";
+    return;
+  }
+
+  const dates = distinctDates(net);
+  const latest = dates[dates.length - 1];
+  $("#fl-compare-sub", root).textContent = `기준일 ${latest}`;
+  $("#fl-matrix-sub", root).textContent = `기준일 ${latest} 하루(1영업일) · 단위 억원`;
+  const todays = net.filter((r) => r.trade_date === latest);
+  const byClassToday = new Map(todays.map((r) => [r.bond_class, r]));
+
+  const table = document.createElement("table");
+  table.className = "data";
+  const thead = document.createElement("thead");
+  const hr = document.createElement("tr");
+  for (const h of ["투자자", ...FLOW_CLASSES]) {
+    const th = document.createElement("th"); th.textContent = h; hr.appendChild(th);
+  }
+  thead.appendChild(hr);
+  const tbody = document.createElement("tbody");
+  const addRow = (name, getter) => {
+    const tr = document.createElement("tr");
+    const nm = document.createElement("td"); nm.textContent = name; tr.appendChild(nm);
+    for (const cls of FLOW_CLASSES) {
+      const row = byClassToday.get(cls);
+      tr.appendChild(intTd(row ? getter(row) : null));
+    }
+    tbody.appendChild(tr);
+  };
+  for (const inv of FLOW_INVESTORS) addRow(inv.name, (row) => row[inv.key]);
+  addRow("전체", (row) => row.total);
+  table.append(thead, tbody);
+  matrixBox.appendChild(table);
+
+  const classSel = $("#fl-class", root);
+  for (const cls of FLOW_CLASSES) {
+    const op = document.createElement("option");
+    op.value = cls; op.textContent = cls === "합계" ? "전체 채권" : cls;
+    classSel.appendChild(op);
+  }
+
+  const defaultKeys = new Set(FLOW_INVESTORS.filter((inv) => inv.chart).map((inv) => inv.key));
+  const selected = new Set(defaultKeys);
+  const picks = $("#fl-investor-picks", root);
+  const allButton = $("#fl-investor-all", root);
+  for (const inv of FLOW_INVESTORS) {
+    const button = document.createElement("button");
+    button.type = "button"; button.dataset.investor = inv.key; button.textContent = inv.name;
+    button.classList.toggle("active", selected.has(inv.key));
+    button.setAttribute("aria-pressed", selected.has(inv.key) ? "true" : "false");
+    picks.appendChild(button);
+  }
+
+  let agg = "w";
+  const weekKey = (iso) => {
+    const d = new Date(`${iso}T00:00:00Z`);
+    const wd = (d.getUTCDay() + 6) % 7;
+    d.setUTCDate(d.getUTCDate() - wd);
+    return d.toISOString().slice(0, 10);
+  };
+  const refreshPicks = () => {
+    for (const button of picks.querySelectorAll("button")) {
+      const active = selected.has(button.dataset.investor);
+      button.classList.toggle("active", active);
+      button.setAttribute("aria-pressed", active ? "true" : "false");
+    }
+    allButton.textContent = selected.size === FLOW_INVESTORS.length ? "주요 5개" : "전체 선택";
+  };
+  const drawChart = () => {
+    const rows = net.filter((r) => r.bond_class === classSel.value);
+    const keyOf = agg === "w" ? weekKey : (d) => d.slice(0, 7);
+    const buckets = new Map();
+    for (const row of rows) {
+      const key = keyOf(row.trade_date);
+      const bucket = buckets.get(key) ?? { lastDate: row.trade_date, sums: {} };
+      if (row.trade_date > bucket.lastDate) bucket.lastDate = row.trade_date;
+      for (const inv of FLOW_INVESTORS) {
+        if (row[inv.key] != null) bucket.sums[inv.key] = (bucket.sums[inv.key] ?? 0) + row[inv.key];
+      }
+      buckets.set(key, bucket);
+    }
+    const keys = [...buckets.keys()].sort().slice(agg === "w" ? -13 : -7);
+    const cats = keys.map((key) => agg === "w"
+      ? `~${buckets.get(key).lastDate.slice(5).replace("-", "/")}`
+      : `${Number(key.slice(5, 7))}월`);
+    const activeInvestors = FLOW_INVESTORS.filter((inv) => selected.has(inv.key));
+    const series = activeInvestors.map((inv) => ({
+      name: inv.name,
+      cssVar: SLOT_VARS[FLOW_INVESTORS.indexOf(inv) % SLOT_VARS.length],
+      values: keys.map((key) => buckets.get(key).sums[inv.key] ?? null),
+    }));
+    $("#fl-compare-title", root).textContent =
+      `투자주체 ${activeInvestors.length}개 · ${agg === "w" ? "주간" : "월간"} 순매수`;
+    barChart(chartBox, cats, series, { unit: "억" });
+  };
+
+  picks.addEventListener("click", (event) => {
+    const button = event.target.closest("button[data-investor]");
+    if (!button) return;
+    const key = button.dataset.investor;
+    if (selected.has(key) && selected.size === 1) return;
+    if (selected.has(key)) selected.delete(key); else selected.add(key);
+    refreshPicks(); drawChart();
+  });
+  allButton.addEventListener("click", () => {
+    selected.clear();
+    const keys = allButton.textContent === "주요 5개" ? defaultKeys : new Set(FLOW_INVESTORS.map((inv) => inv.key));
+    for (const key of keys) selected.add(key);
+    refreshPicks(); drawChart();
+  });
+  $("#fl-compare-agg", root).addEventListener("click", (event) => {
+    const button = event.target.closest("button[data-agg]");
+    if (!button) return;
+    agg = button.dataset.agg;
+    for (const item of $("#fl-compare-agg", root).querySelectorAll("button")) item.classList.toggle("active", item === button);
+    drawChart();
+  });
+  classSel.addEventListener("change", drawChart);
+  refreshPicks();
+  drawChart();
+}
+
 function renderFlows() {
   const root = $("#view-flows");
   root.innerHTML = `
@@ -1815,6 +1947,28 @@ function renderFlows() {
       </div>
       <div id="fl-chart"></div>
     </div>
+    <div class="section-title">투자주체·채권종류 비교</div>
+    <p class="section-sub" id="fl-compare-sub"></p>
+    <p class="hint">기존 투자주체별 비교 화면 · KOFIA 장외 거래대금 기준(억원) · 인포맥스 만기별 수급과 합산하지 않음</p>
+    <div class="section-title">투자자 × 채권종류 일간 순매수</div>
+    <p class="hint" id="fl-matrix-sub">최신 기준일 하루(1영업일) · 단위 억원</p>
+    <div class="table-scroll" id="fl-matrix"></div>
+    <div class="card">
+      <div class="card-head">
+        <h2 id="fl-compare-title">투자주체별 주간 순매수</h2><span class="hint">억원</span><span class="spacer"></span>
+        <div class="seg" id="fl-compare-agg">
+          <button data-agg="w" class="active">주간</button>
+          <button data-agg="m">월간</button>
+        </div>
+        <div class="controls"><select class="ctl" id="fl-class" aria-label="채권종류"></select></div>
+      </div>
+      <p class="hint">투자주체를 여러 개 선택할 수 있습니다. 기본값은 주요 5개 주체입니다.</p>
+      <div class="controls">
+        <div class="seg wrap multi-pick" id="fl-investor-picks" aria-label="비교할 투자주체"></div>
+        <button class="ctl-btn" id="fl-investor-all" type="button">전체 선택</button>
+      </div>
+      <div id="fl-compare-chart"></div>
+    </div>
     <div class="section-title">선물 수급 (KRX 국채선물)</div>
     <p class="section-sub" id="fl-fut-sub">근월물(거래량 최대) 기준</p>
     <div class="table-scroll"><table class="data">
@@ -1862,32 +2016,28 @@ function renderFlows() {
     p.className = "hint";
     p.textContent = "인포맥스 현물 수급 미연결 — 마지막 정상값이 서버에 적재되기 전까지 KOFIA 값으로 대체하지 않습니다.";
     $("#fl-maturity", root).appendChild(p);
-    renderFlowsFutures(root);
-    renderRegimeFutures(root);
-    return;
-  }
-
-  const investorSel = $("#fl-investor", root);
-  const scopeSel = $("#fl-scope", root);
-  for (const name of [...new Set(spot.map((r) => r.investor))].sort()) {
-    const op = document.createElement("option"); op.value = name; op.textContent = name; investorSel.appendChild(op);
-  }
-  for (const name of [...new Set(spot.map((r) => r.market_scope))].sort()) {
-    const op = document.createElement("option"); op.value = name; op.textContent = name; scopeSel.appendChild(op);
-  }
-  const bucketOrder = ["0~6M", "6M~1Y", "1~2Y", "2~3Y", "3~5Y", "5~7Y",
-    "7~10Y", "10~15Y", "15~20Y", "20~30Y", "30Y+"];
-  const toTn = (v) => Number(v) / 1e9;
-  const signedTn = (v) => v == null ? "—" : `${v > 0 ? "+" : ""}${v.toFixed(3)}`;
-  const makeTile = (label, value, detail) => {
-    const tile = document.createElement("div"); tile.className = "tile";
-    const lab = document.createElement("div"); lab.className = "t-label"; lab.textContent = label;
-    const val = document.createElement("div"); val.className = "t-value"; val.textContent = value;
-    const unit = document.createElement("span"); unit.className = "unit"; unit.textContent = "조원"; val.appendChild(unit);
-    const sub = document.createElement("div"); sub.className = "t-delta"; sub.textContent = detail;
-    tile.append(lab, val, sub); return tile;
-  };
-  const drawSpot = () => {
+  } else {
+    const investorSel = $("#fl-investor", root);
+    const scopeSel = $("#fl-scope", root);
+    for (const name of [...new Set(spot.map((r) => r.investor))].sort()) {
+      const op = document.createElement("option"); op.value = name; op.textContent = name; investorSel.appendChild(op);
+    }
+    for (const name of [...new Set(spot.map((r) => r.market_scope))].sort()) {
+      const op = document.createElement("option"); op.value = name; op.textContent = name; scopeSel.appendChild(op);
+    }
+    const bucketOrder = ["0~6M", "6M~1Y", "1~2Y", "2~3Y", "3~5Y", "5~7Y",
+      "7~10Y", "10~15Y", "15~20Y", "20~30Y", "30Y+"];
+    const toTn = (v) => Number(v) / 1e9;
+    const signedTn = (v) => v == null ? "—" : `${v > 0 ? "+" : ""}${v.toFixed(3)}`;
+    const makeTile = (label, value, detail) => {
+      const tile = document.createElement("div"); tile.className = "tile";
+      const lab = document.createElement("div"); lab.className = "t-label"; lab.textContent = label;
+      const val = document.createElement("div"); val.className = "t-value"; val.textContent = value;
+      const unit = document.createElement("span"); unit.className = "unit"; unit.textContent = "조원"; val.appendChild(unit);
+      const sub = document.createElement("div"); sub.className = "t-delta"; sub.textContent = detail;
+      tile.append(lab, val, sub); return tile;
+    };
+    const drawSpot = () => {
     const rows = spot.filter((r) => r.investor === investorSel.value && r.market_scope === scopeSel.value);
     const dates = [...new Set(rows.map((r) => r.trade_date))].sort();
     const latest = dates[dates.length - 1];
@@ -1926,11 +2076,13 @@ function renderFlows() {
     $("#fl-chart-title", root).textContent = `${investorSel.value} 월간 순매수 추이`;
     barChart($("#fl-chart", root), chartDates.map((d) => d.slice(2, 7).replace("-", "/")),
       [{ name: "전체", cssVar: "--series-1", values: chartDates.map((d) => totals.get(d) ?? null) }], { unit: "조" });
-  };
-  investorSel.addEventListener("change", drawSpot);
-  scopeSel.addEventListener("change", drawSpot);
-  drawSpot();
+    };
+    investorSel.addEventListener("change", drawSpot);
+    scopeSel.addEventListener("change", drawSpot);
+    drawSpot();
+  }
 
+  renderInvestorComparison(root);
   renderFlowsFutures(root);
   renderRegimeFutures(root);
 }
@@ -1940,11 +2092,12 @@ function renderFlows() {
 // 전 화면을 붙잡았다. 1단계는 첫 화면(일간 모니터링·매트릭스·심리지표·상대가치·국면)에
 // 필요한 것만 기다려 바로 그리고, 늦게 오는 탭 데이터는 도착하는 대로 그 탭만 다시 그린다.
 // 2단계 로더는 실패 시 빈 배열을 주므로(api.js fetchRecentSafe) 빈 상태로 먼저 그려도 안전하다.
-// 2단계 필드(futures·dart·dartDetails·spotFlows·futFrg·issue·issueMonthly)를 새 화면에서 쓰려면
+// 2단계 필드(futures·dart·dartDetails·flows·spotFlows·futFrg·issue·issueMonthly)를 새 화면에서 쓰려면
 // 그 화면의 렌더러를 아래 fill() 에 함께 물려야 한다 — 1단계 렌더에는 아직 비어 있다.
 async function main() {
   // 2단계 요청도 지금 바로 띄운다 — 1단계 대기와 동시에 진행된다
   const pFutures = loadKrxFutures(30);
+  const pFlows = loadInvestorFlows(200);
   const pSpotFlows = loadInfomaxSpotFlows();
   const pFutFrg = loadFuturesForeign();
   const pIssue = loadIssueStats();
@@ -1985,8 +2138,10 @@ async function main() {
   const fill = (promises, assign, render) =>
     Promise.all(promises).then((vals) => { assign(...vals); render(); }).catch(() => {});
 
-  fill([pSpotFlows, pFutures, pFutFrg],
-    (spotFlows, futures, futFrg) => { S.spotFlows = spotFlows; S.futures = futures; S.futFrg = futFrg; },
+  fill([pFlows, pSpotFlows, pFutures, pFutFrg],
+    (flows, spotFlows, futures, futFrg) => {
+      S.flows = flows; S.spotFlows = spotFlows; S.futures = futures; S.futFrg = futFrg;
+    },
     renderFlows);
   fill([pIssue, pIssueMonthly],
     (issue, issueMonthly) => { S.issue = issue; S.issueMonthly = issueMonthly; },
