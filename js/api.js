@@ -145,6 +145,15 @@ export function loadInvestorFlows(days = 95) {
   );
 }
 
+// 인포맥스 4668/IMDH 현물 순매수 — 월간, 전체 및 만기구간별(원자료 단위 천원).
+// KOFIA 투자자별 거래와 정의·분류가 다르므로 값 폴백을 하지 않는다.
+export function loadInfomaxSpotFlows() {
+  return fetchRecentSafe(
+    "infomax_spot_flows?select=trade_date,period,market_scope,investor,maturity_bucket," +
+      "net_buy_krw_thousand,source_code,imported_at&order=trade_date.asc,maturity_bucket.asc"
+  );
+}
+
 // KOFIA 발행·만기 통계(억원) — 최근 8주 + 만기 예정(미래 3주). 테이블 미생성 시 빈 배열
 export function loadIssueStats() {
   const from = sinceISO(56);

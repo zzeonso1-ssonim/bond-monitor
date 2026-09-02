@@ -2,14 +2,13 @@
 import {
   MONITOR_GROUPS, MATRIX_GROUPS, XCURVE_DEFS, RV_DEFS,
   REGIME_LABELS, MARKET_SYMBOLS, MARKET_TABLE, SLOT_VARS,
-  FLOW_INVESTORS, FLOW_CLASSES,
   MPC_MEETINGS, MPC_MEETINGS_META, REGIME_FLOW_LEAD_MONTHS, REGIME_FLOW_POLICIES,
   REGIME_FLOW_GAP_MONTHS,
 } from "./config.js";
 import {
   loadSpreadSeries, loadMarket, loadRegimeStats, loadWebMeta,
   loadKrxFutures, loadDartOfferings, loadDartDetails,
-  loadInvestorFlows, loadFuturesForeign, loadFuturesForeignRange,
+  loadInfomaxSpotFlows, loadFuturesForeign, loadFuturesForeignRange,
   loadIssueStats, loadIssueMonthly,
 } from "./api.js";
 import { lineChart, regimeRangeChart, dualLineChart, dualSpreadChart, barChart } from "./charts.js";
@@ -21,7 +20,7 @@ const $ = (sel, root = document) => root.querySelector(sel);
 const S = {
   series: new Map(), market: new Map(),
   stats: { regime: new Map(), rv: new Map(), xcurve: new Map() },
-  futures: [], dart: [], dartDetails: [], flows: [], futFrg: [], issue: [], issueMonthly: [],
+  futures: [], dart: [], dartDetails: [], spotFlows: [], futFrg: [], issue: [], issueMonthly: [],
   regimeFrg: new Map(),        // 국면 bucket → 그 구간 외국인 선물 순매수 행 (lazy 캐시)
   asof: "",
 };
@@ -1799,21 +1798,20 @@ function renderFlows() {
         · <a href="${LIQUIDITY_DEFS[2].url}" target="_blank" rel="noopener">MMF FreeSIS 원자료 ↗</a>
       </p>
     </div>
-    <div class="section-title">현물 수급 (장외 투자자별 거래)</div>
+    <div class="section-title">현물 수급 (인포맥스 장외채권)</div>
     <p class="section-sub" id="fl-sub"></p>
-    <p class="hint">KOFIA 채권정보센터 투자자별 거래현황(장외) · 거래대금 순매수 기준 · 단위 억원</p>
+    <p class="hint">인포맥스 4668 / IMDH · 순매수거래량 · 원자료 천원, 화면 표시 조원 · KOFIA 값으로 대체하지 않음</p>
+    <div class="controls">
+      <select class="ctl" id="fl-investor" aria-label="투자자"></select>
+      <select class="ctl" id="fl-scope" aria-label="시장 범위"></select>
+    </div>
     <div class="tile-row" id="fl-tiles"></div>
-    <div class="section-title">투자자 × 채권종류 일간 순매수</div>
-    <p class="hint" id="fl-matrix-sub">최신 기준일 하루(1영업일) · 단위 억원</p>
-    <div class="table-scroll" id="fl-matrix"></div>
+    <div class="section-title">최신월 만기구간별 집중도</div>
+    <p class="hint" id="fl-maturity-sub">절대 순매수 규모가 큰 구간 순 · 단위 조원</p>
+    <div class="table-scroll" id="fl-maturity"></div>
     <div class="card">
       <div class="card-head">
-        <h2 id="fl-chart-title">투자주체별 주간 순매수</h2><span class="hint">억원</span><span class="spacer"></span>
-        <div class="seg" id="fl-seg">
-          <button data-agg="w" class="active">주간</button>
-          <button data-agg="m">월간</button>
-        </div>
-        <div class="controls"><select class="ctl" id="fl-class"></select></div>
+        <h2 id="fl-chart-title">월간 순매수 추이</h2><span class="hint">조원 · 최근 36개월</span>
       </div>
       <div id="fl-chart"></div>
     </div>
@@ -1858,137 +1856,80 @@ function renderFlows() {
   renderLiquidity(root);
   renderForeignBalance(root);
 
-  const net = S.flows.filter((r) => r.trade_type === "순매수");
-  if (!net.length) {
+  const spot = S.spotFlows.filter((r) => r.period === "monthly");
+  if (!spot.length) {
     const p = document.createElement("p");
     p.className = "hint";
-    p.textContent = "데이터 적재 준비 중 (bond-spread-system sync_investor_flows 실행 후 표시됩니다)";
-    $("#fl-matrix", root).appendChild(p);
+    p.textContent = "인포맥스 현물 수급 미연결 — 마지막 정상값이 서버에 적재되기 전까지 KOFIA 값으로 대체하지 않습니다.";
+    $("#fl-maturity", root).appendChild(p);
     renderFlowsFutures(root);
     renderRegimeFutures(root);
     return;
   }
 
-  const dates = distinctDates(net);
-  const latest = dates[dates.length - 1];
-  $("#fl-sub", root).textContent = `기준일 ${latest}`;
-  $("#fl-matrix-sub", root).textContent = `기준일 ${latest} 하루(1영업일) · 단위 억원`;
-  const todays = net.filter((r) => r.trade_date === latest);
-  const byClassToday = new Map(todays.map((r) => [r.bond_class, r]));
-
-  // 합계(전 채권종류) 일별 시계열 — 타일·차트 공용
-  const sumSeries = net.filter((r) => r.bond_class === "합계");
-
-  // 타일: 주요 투자자 당일 순매수 + 기준일이 속한 달의 월초 이후 누적
-  const tiles = $("#fl-tiles", root);
-  const latestMonth = latest.slice(0, 7);
-  const monthDates = new Set(dates.filter((d) => d.startsWith(latestMonth)));
-  const monthLabel = `${Number(latest.slice(5, 7))}월 누적 `;
-  for (const inv of FLOW_INVESTORS.filter((i) => i.chart)) {
-    const cur = byClassToday.get("합계")?.[inv.key] ?? null;
-    let cum = 0, has = false;
-    for (const r of sumSeries) {
-      if (monthDates.has(r.trade_date) && r[inv.key] != null) { cum += r[inv.key]; has = true; }
-    }
-    const tile = document.createElement("div");
-    tile.className = "tile";
-    const lab = document.createElement("div");
-    lab.className = "t-label";
-    lab.textContent = inv.name;
-    const val = document.createElement("div");
-    val.className = "t-value";
-    val.textContent = intSigned(cur);
-    if (cur != null) {
-      const u = document.createElement("span");
-      u.className = "unit";
-      u.textContent = "억";
-      val.appendChild(u);
-    }
-    const del = document.createElement("div");
-    del.className = "t-delta";
-    del.append(monthLabel, intDeltaSpan(has ? cum : null));
-    tile.append(lab, val, del);
-    tiles.appendChild(tile);
+  const investorSel = $("#fl-investor", root);
+  const scopeSel = $("#fl-scope", root);
+  for (const name of [...new Set(spot.map((r) => r.investor))].sort()) {
+    const op = document.createElement("option"); op.value = name; op.textContent = name; investorSel.appendChild(op);
   }
-
-  // 매트릭스 표: 행=투자자(+전체), 열=채권종류 — 기준일 하루(1영업일) 순매수(억원)
-  const table = document.createElement("table");
-  table.className = "data";
-  const thead = document.createElement("thead");
-  const hr = document.createElement("tr");
-  for (const h of ["투자자", ...FLOW_CLASSES]) {
-    const th = document.createElement("th");
-    th.textContent = h;
-    hr.appendChild(th);
+  for (const name of [...new Set(spot.map((r) => r.market_scope))].sort()) {
+    const op = document.createElement("option"); op.value = name; op.textContent = name; scopeSel.appendChild(op);
   }
-  thead.appendChild(hr);
-  const tbody = document.createElement("tbody");
-  const addRow = (name, get) => {
-    const tr = document.createElement("tr");
-    const nm = document.createElement("td");
-    nm.textContent = name;
-    tr.appendChild(nm);
-    for (const cls of FLOW_CLASSES) {
-      const r = byClassToday.get(cls);
-      tr.appendChild(intTd(r ? get(r) : null));
-    }
-    tbody.appendChild(tr);
+  const bucketOrder = ["0~6M", "6M~1Y", "1~2Y", "2~3Y", "3~5Y", "5~7Y",
+    "7~10Y", "10~15Y", "15~20Y", "20~30Y", "30Y+"];
+  const toTn = (v) => Number(v) / 1e9;
+  const signedTn = (v) => v == null ? "—" : `${v > 0 ? "+" : ""}${v.toFixed(3)}`;
+  const makeTile = (label, value, detail) => {
+    const tile = document.createElement("div"); tile.className = "tile";
+    const lab = document.createElement("div"); lab.className = "t-label"; lab.textContent = label;
+    const val = document.createElement("div"); val.className = "t-value"; val.textContent = value;
+    const unit = document.createElement("span"); unit.className = "unit"; unit.textContent = "조원"; val.appendChild(unit);
+    const sub = document.createElement("div"); sub.className = "t-delta"; sub.textContent = detail;
+    tile.append(lab, val, sub); return tile;
   };
-  for (const inv of FLOW_INVESTORS) addRow(inv.name, (r) => r[inv.key]);
-  addRow("전체", (r) => r.total);
-  table.append(thead, tbody);
-  $("#fl-matrix", root).appendChild(table);
+  const drawSpot = () => {
+    const rows = spot.filter((r) => r.investor === investorSel.value && r.market_scope === scopeSel.value);
+    const dates = [...new Set(rows.map((r) => r.trade_date))].sort();
+    const latest = dates[dates.length - 1];
+    const latestRows = rows.filter((r) => r.trade_date === latest);
+    const byBucket = new Map(latestRows.map((r) => [r.maturity_bucket, toTn(r.net_buy_krw_thousand)]));
+    const total = byBucket.get("전체") ?? null;
+    const detailRows = bucketOrder.map((b) => ({ bucket: b, value: byBucket.get(b) ?? 0 }));
+    const topBuy = [...detailRows].filter((r) => r.value > 0).sort((a, b) => b.value - a.value)[0];
+    const topSell = [...detailRows].filter((r) => r.value < 0).sort((a, b) => a.value - b.value)[0];
+    const imported = latestRows[0]?.imported_at?.slice(0, 16).replace("T", " ") || "—";
+    $("#fl-sub", root).textContent = `기준일 ${latest} · ${investorSel.value} · ${scopeSel.value} · 마지막 적재 ${imported}`;
+    $("#fl-maturity-sub", root).textContent = `기준일 ${latest} · 절대 순매수 규모가 큰 구간 순 · 단위 조원`;
 
-  // 투자주체별 주간/월간 순매수 막대그래프 — 채권종류 선택(기본 합계) 유지
-  const sel = $("#fl-class", root);
-  for (const cls of FLOW_CLASSES) {
-    const op = document.createElement("option");
-    op.value = cls;
-    op.textContent = cls === "합계" ? "전체 채권" : cls;
-    sel.appendChild(op);
-  }
-  let agg = "w"; // w=주간(월~금), m=월간(달력월)
-  // 주간 키: 해당 주 월요일(ISO), 라벨은 그 주의 마지막 거래일
-  const weekKey = (iso) => {
-    const d = new Date(iso + "T00:00:00Z");
-    const wd = (d.getUTCDay() + 6) % 7; // 월=0
-    d.setUTCDate(d.getUTCDate() - wd);
-    return d.toISOString().slice(0, 10);
-  };
-  const drawChart = () => {
-    const rows = net.filter((r) => r.bond_class === sel.value);
-    const keyOf = agg === "w" ? (d) => weekKey(d) : (d) => d.slice(0, 7);
-    const buckets = new Map(); // key -> {lastDate, sums:{invKey:num}}
-    for (const r of rows) {
-      const k = keyOf(r.trade_date);
-      const b = buckets.get(k) ?? { lastDate: r.trade_date, sums: {} };
-      if (r.trade_date > b.lastDate) b.lastDate = r.trade_date;
-      for (const inv of FLOW_INVESTORS) {
-        if (r[inv.key] != null) b.sums[inv.key] = (b.sums[inv.key] ?? 0) + r[inv.key];
+    const tiles = $("#fl-tiles", root); tiles.innerHTML = "";
+    tiles.appendChild(makeTile("월간 전체 순매수", signedTn(total), `소스 ${latestRows[0]?.source_code || "—"}`));
+    tiles.appendChild(makeTile("순매수 집중", signedTn(topBuy?.value), topBuy?.bucket || "해당 없음"));
+    tiles.appendChild(makeTile("순매도 집중", signedTn(topSell?.value), topSell?.bucket || "해당 없음"));
+
+    const box = $("#fl-maturity", root); box.innerHTML = "";
+    const table = document.createElement("table"); table.className = "data";
+    table.innerHTML = "<thead><tr><th>만기구간</th><th>순매수(조원)</th><th>총 절대규모 대비</th><th>방향</th></tr></thead>";
+    const tbody = document.createElement("tbody");
+    const gross = detailRows.reduce((s, r) => s + Math.abs(r.value), 0);
+    for (const r of [...detailRows].sort((a, b) => Math.abs(b.value) - Math.abs(a.value))) {
+      const tr = document.createElement("tr");
+      for (const text of [r.bucket, signedTn(r.value), gross ? `${(Math.abs(r.value) / gross * 100).toFixed(1)}%` : "—", r.value > 0 ? "순매수" : r.value < 0 ? "순매도" : "중립"]) {
+        const td = document.createElement("td"); td.textContent = text; tr.appendChild(td);
       }
-      buckets.set(k, b);
+      tbody.appendChild(tr);
     }
-    const keys = [...buckets.keys()].sort().slice(agg === "w" ? -13 : -7);
-    const cats = keys.map((k) => {
-      const b = buckets.get(k);
-      return agg === "w" ? `~${b.lastDate.slice(5).replace("-", "/")}` : `${+k.slice(5, 7)}월`;
-    });
-    const series = FLOW_INVESTORS.filter((i) => i.chart).map((inv, idx) => ({
-      name: inv.name, cssVar: SLOT_VARS[idx % SLOT_VARS.length],
-      values: keys.map((k) => buckets.get(k).sums[inv.key] ?? null),
-    }));
-    $("#fl-chart-title", root).textContent = `투자주체별 ${agg === "w" ? "주간" : "월간"} 순매수`;
-    barChart($("#fl-chart", root), cats, series, { unit: "억" });
+    table.appendChild(tbody); box.appendChild(table);
+
+    const totals = new Map(rows.filter((r) => r.maturity_bucket === "전체")
+      .map((r) => [r.trade_date, toTn(r.net_buy_krw_thousand)]));
+    const chartDates = dates.slice(-36);
+    $("#fl-chart-title", root).textContent = `${investorSel.value} 월간 순매수 추이`;
+    barChart($("#fl-chart", root), chartDates.map((d) => d.slice(2, 7).replace("-", "/")),
+      [{ name: "전체", cssVar: "--series-1", values: chartDates.map((d) => totals.get(d) ?? null) }], { unit: "조" });
   };
-  $("#fl-seg", root).addEventListener("click", (e) => {
-    const btn = e.target.closest("button");
-    if (!btn) return;
-    agg = btn.dataset.agg;
-    for (const b of $("#fl-seg", root).querySelectorAll("button")) b.classList.toggle("active", b === btn);
-    drawChart();
-  });
-  sel.addEventListener("change", drawChart);
-  drawChart();
+  investorSel.addEventListener("change", drawSpot);
+  scopeSel.addEventListener("change", drawSpot);
+  drawSpot();
 
   renderFlowsFutures(root);
   renderRegimeFutures(root);
@@ -1999,12 +1940,12 @@ function renderFlows() {
 // 전 화면을 붙잡았다. 1단계는 첫 화면(일간 모니터링·매트릭스·심리지표·상대가치·국면)에
 // 필요한 것만 기다려 바로 그리고, 늦게 오는 탭 데이터는 도착하는 대로 그 탭만 다시 그린다.
 // 2단계 로더는 실패 시 빈 배열을 주므로(api.js fetchRecentSafe) 빈 상태로 먼저 그려도 안전하다.
-// 2단계 필드(futures·dart·dartDetails·flows·futFrg·issue·issueMonthly)를 새 화면에서 쓰려면
+// 2단계 필드(futures·dart·dartDetails·spotFlows·futFrg·issue·issueMonthly)를 새 화면에서 쓰려면
 // 그 화면의 렌더러를 아래 fill() 에 함께 물려야 한다 — 1단계 렌더에는 아직 비어 있다.
 async function main() {
   // 2단계 요청도 지금 바로 띄운다 — 1단계 대기와 동시에 진행된다
   const pFutures = loadKrxFutures(30);
-  const pFlows = loadInvestorFlows(200);
+  const pSpotFlows = loadInfomaxSpotFlows();
   const pFutFrg = loadFuturesForeign();
   const pIssue = loadIssueStats();
   const pIssueMonthly = loadIssueMonthly();
@@ -2044,8 +1985,8 @@ async function main() {
   const fill = (promises, assign, render) =>
     Promise.all(promises).then((vals) => { assign(...vals); render(); }).catch(() => {});
 
-  fill([pFlows, pFutures, pFutFrg],
-    (flows, futures, futFrg) => { S.flows = flows; S.futures = futures; S.futFrg = futFrg; },
+  fill([pSpotFlows, pFutures, pFutFrg],
+    (spotFlows, futures, futFrg) => { S.spotFlows = spotFlows; S.futures = futures; S.futFrg = futFrg; },
     renderFlows);
   fill([pIssue, pIssueMonthly],
     (issue, issueMonthly) => { S.issue = issue; S.issueMonthly = issueMonthly; },
