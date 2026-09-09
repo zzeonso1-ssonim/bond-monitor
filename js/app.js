@@ -1482,10 +1482,10 @@ function renderFlowsFutures(root) {
     }
     if (hasAny) {
       const latest = S.futFrg[S.futFrg.length - 1]?.trade_date;
-      // 이 두 심볼만 KRX 로그인 화면에서 와서 서버 자동수집이 안 된다(북마클릿 수동 갱신).
-      // 조용히 낡는 것이 제일 위험하므로, 시장 데이터 최신일과 비교해 지연 영업일을 드러낸다.
-      // 기준은 KOSPI 거래일 — 같은 국내 영업일 달력이면서 자동 수집되는 계열.
-      const bizDays = (S.market.get("KOSPI") || []).map((r) => r.trade_date);
+      // 장중 KOSPI 관측치를 일 마감 수급의 지연으로 오인하지 않도록
+      // 국내 채권 종가가 적재된 기준일까지 비교한다.
+      const bizDays = (S.market.get("KOSPI") || []).map((r) => r.trade_date)
+        .filter((d) => S.asof && d <= S.asof);
       const lag = latest ? bizDays.filter((d) => d > latest).length : null;
       const sub = $("#fl-frg-sub", root);
       sub.textContent = `KRX 파생 투자자별 거래실적 · 계약 수 기준 · 기준일 ${latest}`;
@@ -1493,8 +1493,7 @@ function renderFlowsFutures(root) {
         const warn = document.createElement("span");
         warn.className = "stale-warn";
         warn.textContent =
-          ` · ${lag}영업일 지연 (KRX 로그인이 필요해 자동수집 불가 — ` +
-          `bond-spread-system/tools 의 북마클릿·백필 스크립트로 갱신)`;
+          ` · 국내 채권 기준일 대비 ${lag}영업일 지연 · KRX 자동 수집 상태 확인 필요`;
         sub.appendChild(warn);
       }
       let period = "ytd";
