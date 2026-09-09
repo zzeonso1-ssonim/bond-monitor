@@ -442,6 +442,13 @@ function buildMarketTable(body) {
       const tr = document.createElement("tr");
       const name = document.createElement("td");
       name.textContent = it.name;
+      const basis = document.createElement("small");
+      basis.className = "hint";
+      basis.style.display = "block";
+      basis.textContent = cur?.trade_date || "미수집";
+      if (it.symbol === "AU10Y") basis.textContent += " · RBA 금요일 공표(수요일까지)";
+      if (it.symbol === "UST2Y") basis.textContent += " · FRED 공표 기준";
+      name.appendChild(basis);
       tr.appendChild(name);
       const vtd = document.createElement("td");
       vtd.textContent = cur == null ? "—"
