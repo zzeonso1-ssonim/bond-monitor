@@ -933,11 +933,12 @@ export function dualSpreadChart(container, data, opts = {}) {
 
 // 그룹 막대 차트 — 수급동향 주간/월간 순매수용. 음수 지원(0선 기준 위/아래).
 // categories: ["07/18", ...], series: [{name, cssVar, values:[num|null, ...]}]
-// 네이티브 <title> 툴팁 사용(값은 콤마 정수). opts.unit 은 y축 단위 표기.
+// 네이티브 <title> 툴팁 사용. opts.unit 은 y축 단위, opts.digits 는 소수 자릿수.
 export function barChart(container, categories, series, opts = {}) {
   const W = 960, H = 300;
   const M = { l: 56, r: 14, t: 12, b: 26 };
   const unit = opts.unit || "";
+  const digits = opts.digits ?? 0;
 
   container.textContent = "";
   const wrap = document.createElement("div");
@@ -999,7 +1000,9 @@ export function barChart(container, categories, series, opts = {}) {
         fill: `var(${s.cssVar})`, opacity: v < 0 ? 0.75 : 1,
       });
       const tt = el("title", {});
-      tt.textContent = `${cat} · ${s.name}: ${Math.round(v).toLocaleString("ko-KR")}${unit}`;
+      tt.textContent = `${cat} · ${s.name}: ${v.toLocaleString("ko-KR", {
+        minimumFractionDigits: digits, maximumFractionDigits: digits,
+      })}${unit}`;
       rect.appendChild(tt);
       svg.appendChild(rect);
     });

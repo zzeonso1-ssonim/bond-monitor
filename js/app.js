@@ -2108,12 +2108,8 @@ function renderFlows() {
       });
       const selectionLabel = activeBuckets.length <= 3 ? activeBuckets.join(" · ") : `${activeBuckets.length}개 구간`;
       $("#fl-chart-title", root).textContent = `${investorSel.value} · ${selectionLabel} 월간 순매수`;
-      if (chartSeries.length === 1) {
-        barChart($("#fl-chart", root), dates.map((date) => date.slice(2, 7).replace("-", "/")),
-          chartSeries, { unit: "조" });
-      } else {
-        lineChart($("#fl-chart", root), chartSeries, { unit: "조", digits: 3, zeroLine: true });
-      }
+      barChart($("#fl-chart", root), dates.map((date) => date.slice(2, 7).replace("-", "/")),
+        chartSeries, { unit: "조", digits: 3 });
     };
     const drawSpot = () => {
     const rows = spot.filter((r) => r.investor === investorSel.value && r.market_scope === scopeSel.value);
