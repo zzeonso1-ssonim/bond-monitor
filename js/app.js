@@ -1271,20 +1271,33 @@ const FOREIGN_BALANCE_DEF = {
   cssVar: "--series-6",
 };
 
-// 서로 다른 빈도의 펀드 시계열을 같은 월말 축으로 맞춘다.
-// 월별 시계열은 해당 월 관측치, 일별 MMF는 해당 월 마지막 관측치를 사용한다.
-function monthlyMarketPoints(symbol) {
-  const byMonth = new Map();
-  for (const point of marketPoints(symbol)) byMonth.set(point.d.slice(0, 7), point);
-  return [...byMonth.entries()].map(([ym, point]) => {
-    const [year, month] = ym.split("-").map(Number);
-    const day = new Date(Date.UTC(year, month, 0)).getUTCDate();
-    return { d: `${ym}-${String(day).padStart(2, "0")}`, v: point.v };
-  });
+const LIQUIDITY_PERIODS = {
+  d: { label: "일별", chartRows: 90, tableRows: 15, delta: "전일 대비", dateHead: "일자" },
+  w: { label: "주별", chartRows: 52, tableRows: 12, delta: "전주 대비", dateHead: "주 시작" },
+  m: { label: "월별", chartRows: 36, tableRows: 12, delta: "전월 대비", dateHead: "월" },
+};
+
+function liquidityPeriodPoints(symbol, period) {
+  const points = marketPoints(symbol);
+  if (period === "d") return points.map((point) => ({ ...point, k: point.d }));
+  const grouped = new Map();
+  for (const point of points) {
+    let key;
+    if (period === "m") key = point.d.slice(0, 7);
+    else {
+      const dt = new Date(`${point.d}T00:00:00Z`);
+      const daysFromMonday = (dt.getUTCDay() + 6) % 7;
+      dt.setUTCDate(dt.getUTCDate() - daysFromMonday);
+      key = dt.toISOString().slice(0, 10);
+    }
+    grouped.set(key, { ...point, k: key });
+  }
+  return [...grouped.values()];
 }
 
 function renderLiquidity(root) {
   const seg = $("#liq-seg", root);
+  const periodSeg = $("#liq-period", root);
   for (const def of LIQUIDITY_DEFS) {
     const button = document.createElement("button");
     button.dataset.symbol = def.symbol;
@@ -1295,24 +1308,35 @@ function renderLiquidity(root) {
   }
 
   const draw = () => {
+    const period = periodSeg.querySelector("button.active")?.dataset.period || "d";
+    const periodDef = LIQUIDITY_PERIODS[period];
     const active = new Set(
       [...seg.querySelectorAll("button.active")].map((button) => button.dataset.symbol)
     );
     const selected = LIQUIDITY_DEFS.filter((def) => active.has(def.symbol));
-    const prepared = selected.map((def) => ({ ...def, points: monthlyMarketPoints(def.symbol) }));
+    const prepared = selected.map((def) => {
+      const allPoints = liquidityPeriodPoints(def.symbol, period);
+      return { ...def, allPoints, points: allPoints.slice(-periodDef.chartRows) };
+    });
     $("#liq-title", root).textContent =
-      selected.length === 1 ? `${selected[0].name} 수탁고 추이` : "펀드 유형별 수탁고 비교";
+      selected.length === 1 ? `${selected[0].name} ${periodDef.label} 수탁고 추이`
+        : `펀드 유형별 ${periodDef.label} 수탁고 비교`;
+    $("#liq-hint", root).textContent =
+      `FreeSIS 설정원본 일별 자료 · ${periodDef.label}은 해당 기간의 마지막 관측치 · 최신 공표일 기준`;
+    $("#liq-table-title", root).textContent = `${periodDef.label} 수탁고 표`;
+    $("#liq-table-hint", root).textContent =
+      `최근 ${periodDef.tableRows}${period === "d" ? "영업일" : period === "w" ? "주" : "개월"} · 선택한 유형만 표시 · 단위 조원`;
 
     const tiles = $("#liq-tiles", root);
     tiles.textContent = "";
     for (const item of prepared) {
-      const last = item.points[item.points.length - 1] || null;
-      const prev = item.points.length > 1 ? item.points[item.points.length - 2] : null;
+      const last = item.allPoints[item.allPoints.length - 1] || null;
+      const prev = item.allPoints.length > 1 ? item.allPoints[item.allPoints.length - 2] : null;
       const tile = document.createElement("div");
       tile.className = "tile";
       const label = document.createElement("div");
       label.className = "t-label";
-      label.textContent = last ? `${item.name} · ${last.d.slice(0, 7)}` : item.name;
+      label.textContent = last ? `${item.name} · ${last.d}` : item.name;
       const value = document.createElement("div");
       value.className = "t-value";
       value.textContent = last ? last.v.toFixed(1) : "—";
@@ -1322,7 +1346,7 @@ function renderLiquidity(root) {
       value.appendChild(unit);
       const delta = document.createElement("div");
       delta.className = "t-delta";
-      delta.append("전월 대비 ", deltaSpan(last && prev ? last.v - prev.v : null, 1), "조원");
+      delta.append(`${periodDef.delta} `, deltaSpan(last && prev ? last.v - prev.v : null, 1), "조원");
       tile.append(label, value, delta);
       tiles.appendChild(tile);
     }
@@ -1332,33 +1356,40 @@ function renderLiquidity(root) {
       .map((item) => ({ name: item.name, cssVar: item.cssVar, points: item.points })),
     { unit: "조원", digits: 1, showLegend: true });
 
-    const monthSet = new Set();
+    const dateSet = new Set();
     const valueMaps = new Map();
     for (const item of prepared) {
-      valueMaps.set(item.symbol, new Map(item.points.map((point) => [point.d.slice(0, 7), point.v])));
-      for (const point of item.points) monthSet.add(point.d.slice(0, 7));
+      valueMaps.set(item.symbol, new Map(item.allPoints.map((point) => [point.k, point.v])));
+      for (const point of item.allPoints) dateSet.add(point.k);
     }
-    const months = [...monthSet].sort().reverse().slice(0, 12);
+    const dates = [...dateSet].sort().reverse().slice(0, periodDef.tableRows);
     const head = $("#liq-table-head", root);
     const body = $("#liq-table-body", root);
     head.textContent = "";
     body.textContent = "";
     const headerRow = document.createElement("tr");
-    for (const label of ["월말", ...selected.map((def) => `${def.name}(조원)`)]) {
+    for (const label of [periodDef.dateHead, ...selected.map((def) => `${def.name}(조원)`)]) {
       const th = document.createElement("th");
       th.textContent = label;
       headerRow.appendChild(th);
     }
     head.appendChild(headerRow);
-    for (const month of months) {
+    for (const dateKey of dates) {
       const tr = document.createElement("tr");
       const dateCell = document.createElement("td");
-      dateCell.textContent = month;
+      dateCell.textContent = dateKey;
       tr.appendChild(dateCell);
-      for (const def of selected) tr.appendChild(numTd(valueMaps.get(def.symbol)?.get(month), { digits: 1 }));
+      for (const def of selected) tr.appendChild(numTd(valueMaps.get(def.symbol)?.get(dateKey), { digits: 1 }));
       body.appendChild(tr);
     }
   };
+
+  periodSeg.addEventListener("click", (event) => {
+    const button = event.target.closest("button[data-period]");
+    if (!button || button.classList.contains("active")) return;
+    for (const item of periodSeg.querySelectorAll("button")) item.classList.toggle("active", item === button);
+    draw();
+  });
 
   seg.addEventListener("click", (event) => {
     const button = event.target.closest("button");
@@ -1921,13 +1952,16 @@ function renderFlows() {
     <div class="card">
       <div class="card-head">
         <h2 id="liq-title">펀드 유형별 수탁고 비교</h2><span class="hint">조원</span><span class="spacer"></span>
+        <div class="seg" id="liq-period">
+          <button data-period="d" class="active">일별</button><button data-period="w">주별</button><button data-period="m">월별</button>
+        </div>
         <div class="seg wrap" id="liq-seg"></div>
       </div>
-      <p class="hint">주식형·채권형은 월말 설정원본, MMF는 일별 설정원본의 월 마지막 관측치 · 버튼을 눌러 단독 또는 중첩 비교</p>
+      <p class="hint" id="liq-hint">FreeSIS 설정원본 일별 자료 · 최신 공표일 기준</p>
       <div class="tile-row" id="liq-tiles"></div>
       <div id="liq-chart"></div>
-      <div class="section-title">월말 수탁고 표</div>
-      <p class="hint">최근 12개월 · 선택한 유형만 표시 · 단위 조원</p>
+      <div class="section-title" id="liq-table-title">일별 수탁고 표</div>
+      <p class="hint" id="liq-table-hint">최근 15영업일 · 선택한 유형만 표시 · 단위 조원</p>
       <div class="table-scroll"><table class="data">
         <thead id="liq-table-head"></thead><tbody id="liq-table-body"></tbody>
       </table></div>
