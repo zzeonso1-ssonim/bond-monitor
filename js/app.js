@@ -1938,7 +1938,7 @@ function renderFlows() {
     </div>
     <div class="section-title">현물 수급 (인포맥스 장외채권)</div>
     <p class="section-sub" id="fl-sub"></p>
-    <p class="hint">인포맥스 4668 / IMDH · 순매수거래량 · 원자료 천원, 화면 표시 조원 · KOFIA 값으로 대체하지 않음</p>
+    <p class="hint">인포맥스 4668 / IMDH · 순매수거래량 · 원자료 천원, 화면 표시 조원 · 전체와 11개 구간 차이는 미분류로 표시 · KOFIA 값으로 대체하지 않음</p>
     <div class="controls">
       <select class="ctl" id="fl-investor" aria-label="투자자"></select>
       <select class="ctl" id="fl-scope" aria-label="시장 범위"></select>
@@ -2030,14 +2030,23 @@ function renderFlows() {
   } else {
     const investorSel = $("#fl-investor", root);
     const scopeSel = $("#fl-scope", root);
-    for (const name of [...new Set(spot.map((r) => r.investor))].sort()) {
+    const investorOrder = ["외국인", "은행", "보험", "투신", "기금", "개인",
+      "기타법인", "정부", "종금", "사모펀드", "선물"];
+    const investors = [...new Set(spot.map((r) => r.investor))]
+      .sort((a, b) => {
+        const ai = investorOrder.indexOf(a); const bi = investorOrder.indexOf(b);
+        return (ai < 0 ? 999 : ai) - (bi < 0 ? 999 : bi) || a.localeCompare(b, "ko");
+      });
+    for (const name of investors) {
       const op = document.createElement("option"); op.value = name; op.textContent = name; investorSel.appendChild(op);
     }
+    if (investors.includes("외국인")) investorSel.value = "외국인";
     for (const name of [...new Set(spot.map((r) => r.market_scope))].sort()) {
       const op = document.createElement("option"); op.value = name; op.textContent = name; scopeSel.appendChild(op);
     }
     const bucketOrder = ["0~6M", "6M~1Y", "1~2Y", "2~3Y", "3~5Y", "5~7Y",
-      "7~10Y", "10~15Y", "15~20Y", "20~30Y", "30Y+"];
+      "7~10Y", "10~15Y", "15~20Y", "20~30Y", "30Y+",
+      ...(spot.some((r) => r.maturity_bucket === "미분류") ? ["미분류"] : [])];
     const chartBucketOrder = ["전체", ...bucketOrder];
     const selectedBuckets = new Set(["전체"]);
     const bucketPicks = $("#fl-bucket-picks", root);
