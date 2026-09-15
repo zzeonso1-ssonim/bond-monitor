@@ -164,6 +164,16 @@ export function loadIssueStats() {
   );
 }
 
+// 향후 1년 월별 만기도래용 — 오늘부터 366일, 화면에서 월×채권종류로 집계
+export function loadMaturitySchedule() {
+  const from = new Date().toISOString().slice(0, 10);
+  const to = new Date(Date.now() + 366 * 86400 * 1000).toISOString().slice(0, 10);
+  return fetchRecentSafe(
+    "kofia_issue_stats?select=stat_date,bond_class,matured" +
+      `&stat_date=gte.${from}&stat_date=lte.${to}&matured=not.is.null&order=stat_date.asc,bond_class.asc`
+  );
+}
+
 // 월별 순발행 차트용 — kofia_issue_monthly(월 집계, 2006~). 3/5년 평균 계산에 6년치 로드
 export function loadIssueMonthly() {
   const from = new Date();
