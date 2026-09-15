@@ -10,7 +10,7 @@ import {
   loadSpreadSeries, loadMarket, loadRegimeStats, loadWebMeta,
   loadKrxFutures, loadDartOfferings, loadDartDetails,
   loadInvestorFlows, loadInfomaxSpotFlows, loadFuturesForeign, loadFuturesForeignRange,
-  loadIssueStats, loadIssueMonthly,
+  loadIssueStats, loadMaturitySchedule, loadIssueMonthly,
 } from "./api.js";
 import { lineChart, regimeRangeChart, dualLineChart, dualSpreadChart, barChart } from "./charts.js";
 import { downloadWeeklyReportPdf } from "./report-pdf.js";
@@ -21,7 +21,8 @@ const $ = (sel, root = document) => root.querySelector(sel);
 const S = {
   series: new Map(), market: new Map(),
   stats: { regime: new Map(), rv: new Map(), xcurve: new Map() },
-  futures: [], dart: [], dartDetails: [], flows: [], spotFlows: [], futFrg: [], issue: [], issueMonthly: [],
+  futures: [], dart: [], dartDetails: [], flows: [], spotFlows: [], futFrg: [],
+  issue: [], maturitySchedule: [], issueMonthly: [],
   regimeFrg: new Map(),        // 국면 bucket → 그 구간 외국인 선물 순매수 행 (lazy 캐시)
   asof: "",
 };
@@ -945,6 +946,17 @@ function renderIssue() {
     <div class="table-scroll"><table class="data">
       <thead><tr><th>채권종류</th><th>금주</th><th>다음주</th><th>다다음주</th></tr></thead>
       <tbody id="wk-mat"></tbody></table></div>
+    <div class="section-title">월별 만기도래 (향후 1년)</div>
+    <p class="section-sub" id="mo-mat-sub">억원 · 오늘부터 366일 · 첫 달과 마지막 달은 일부 기간</p>
+    <div class="note"><strong>해석 유의:</strong> 현재까지 발행된 채권의 예정 만기입니다. 아직 발행되지 않은 단기채는 먼 달에 포함되지 않아 과소계상될 수 있습니다.</div>
+    <div class="table-scroll"><table class="data">
+      <thead><tr><th>월</th><th>국채</th><th>지방채</th><th>특수채</th><th>통안증권</th><th>은행채</th><th>기타금융채</th><th>회사채</th><th>ABS</th><th>전체</th></tr></thead>
+      <tbody id="mo-mat"></tbody></table></div>
+    <div class="card">
+      <div class="card-head"><h2 id="mo-mat-chart-title">월별 만기도래 — 전체</h2><span class="hint">억원 · 현재 발행잔액 기준</span></div>
+      <div class="controls"><div class="seg wrap" id="mo-mat-cls"></div></div>
+      <div id="mo-mat-chart"></div>
+    </div>
     <div class="card">
       <div class="card-head"><h2 id="is-chart-title">월별 순발행 (최근 1년)</h2><span class="hint">억원 · 당월은 진행분</span></div>
       <div class="controls"><div class="seg wrap" id="is-cls"></div></div>
@@ -1043,6 +1055,66 @@ function renderIssue() {
         }
       }
     }
+  }
+
+  // 향후 1년 월별 만기도래 — 월×채권종류 표 + 채권종류별 막대그래프
+  {
+    const CLASSES = ["국채", "지방채", "특수채", "통안증권", "은행채", "기타금융채", "회사채", "ABS", "계"];
+    const today = new Date().toISOString().slice(0, 10);
+    const end = addDaysISO(today, 366);
+    const months = [];
+    const cursor = new Date(`${today.slice(0, 7)}-01T00:00:00Z`);
+    const last = new Date(`${end.slice(0, 7)}-01T00:00:00Z`);
+    while (cursor <= last) {
+      months.push(cursor.toISOString().slice(0, 7));
+      cursor.setUTCMonth(cursor.getUTCMonth() + 1);
+    }
+    const sums = new Map(months.map((ym) => [ym, new Map()]));
+    for (const r of S.maturitySchedule) {
+      if (r.stat_date < today || r.stat_date > end || r.matured == null || !sums.has(r.stat_date.slice(0, 7))) continue;
+      const byClass = sums.get(r.stat_date.slice(0, 7));
+      byClass.set(r.bond_class, (byClass.get(r.bond_class) ?? 0) + r.matured);
+    }
+    const body = $("#mo-mat", root);
+    const partialMonths = new Set([today.slice(0, 7), end.slice(0, 7)]);
+    for (const ym of months) {
+      const tr = document.createElement("tr");
+      const month = document.createElement("td");
+      month.textContent = `${ym}${partialMonths.has(ym) ? "*" : ""}`;
+      tr.appendChild(month);
+      for (const cls of CLASSES) {
+        const v = sums.get(ym).get(cls);
+        const td = document.createElement("td");
+        td.textContent = v == null ? "—" : Math.round(v).toLocaleString("ko-KR");
+        tr.appendChild(td);
+      }
+      body.appendChild(tr);
+    }
+    $("#mo-mat-sub", root).textContent =
+      `KOFIA 만기 예정 · 억원 · ${today} ~ ${end} · * 일부 기간만 포함`;
+
+    const seg = $("#mo-mat-cls", root);
+    for (const cls of ["계", ...CLASSES.filter((c) => c !== "계")]) {
+      const b = document.createElement("button");
+      b.dataset.cls = cls;
+      b.textContent = cls === "계" ? "전체" : cls;
+      if (cls === "계") b.className = "active";
+      seg.appendChild(b);
+    }
+    const draw = (cls) => {
+      const label = cls === "계" ? "전체" : cls;
+      $("#mo-mat-chart-title", root).textContent = `월별 만기도래 — ${label}`;
+      barChart($("#mo-mat-chart", root), months.map((ym) => `${ym.slice(2, 4)}.${ym.slice(5, 7)}`), [
+        { name: label, cssVar: "--series-2", values: months.map((ym) => sums.get(ym).get(cls) ?? null) },
+      ], { unit: "억" });
+    };
+    seg.addEventListener("click", (e) => {
+      const btn = e.target.closest("button");
+      if (!btn) return;
+      for (const b of seg.querySelectorAll("button")) b.classList.toggle("active", b === btn);
+      draw(btn.dataset.cls);
+    });
+    draw("계");
   }
 
   // 월별 순발행 막대그래프 (최근 1년) — 채권종류 세그 버튼으로 전환
@@ -2214,6 +2286,7 @@ async function main() {
   const pSpotFlows = loadInfomaxSpotFlows();
   const pFutFrg = loadFuturesForeign();
   const pIssue = loadIssueStats();
+  const pMaturitySchedule = loadMaturitySchedule();
   const pIssueMonthly = loadIssueMonthly();
   const pDart = loadDartOfferings(90);
   const pDartDetails = loadDartDetails(7);
@@ -2256,8 +2329,10 @@ async function main() {
       S.flows = flows; S.spotFlows = spotFlows; S.futures = futures; S.futFrg = futFrg;
     },
     renderFlows);
-  fill([pIssue, pIssueMonthly],
-    (issue, issueMonthly) => { S.issue = issue; S.issueMonthly = issueMonthly; },
+  fill([pIssue, pMaturitySchedule, pIssueMonthly],
+    (issue, maturitySchedule, issueMonthly) => {
+      S.issue = issue; S.maturitySchedule = maturitySchedule; S.issueMonthly = issueMonthly;
+    },
     renderIssue);
   fill([pDart, pDartDetails],
     (dart, dartDetails) => { S.dart = dart; S.dartDetails = dartDetails; },
