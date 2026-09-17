@@ -2200,7 +2200,12 @@ function renderFlows() {
     const drawSpotChart = () => {
       const rows = spot.filter((row) =>
         row.investor === investorSel.value && row.market_scope === scopeSel.value);
-      const dates = [...new Set(rows.map((row) => row.trade_date))].sort().slice(-36);
+      // 월중 갱신본은 날짜별로 보존하되 월간 차트에는 그 달의 최신 누적치만 표시한다.
+      const latestByMonth = new Map();
+      for (const date of [...new Set(rows.map((row) => row.trade_date))].sort()) {
+        latestByMonth.set(date.slice(0, 7), date);
+      }
+      const dates = [...latestByMonth.values()].slice(-36);
       const activeBuckets = chartBucketOrder.filter((bucket) => selectedBuckets.has(bucket));
       const chartSeries = activeBuckets.map((bucket) => {
         const values = new Map(rows.filter((row) => row.maturity_bucket === bucket)
