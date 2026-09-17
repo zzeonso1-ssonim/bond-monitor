@@ -2019,7 +2019,7 @@ function renderFlows() {
         </div>
       </div>
       <div id="foreign-balance-chart"></div>
-      <p class="hint">금감원 상장채권 결제일 기준 일별 잔고와 같은 날 환율 비교 · 좌축 잔고(조원), 우축 원/달러(원) · <a href="${FOREIGN_BALANCE_DEF.url}" target="_blank" rel="noopener">금융감독원 일일 금융시장 동향 원자료 ↗</a></p>
+      <p class="hint">금감원 외국인 상장채권 당일 만기상환분 등 반영 잔고와 같은 날 환율 비교 · 좌축 잔고(조원), 우축 원/달러(원) · <a href="${FOREIGN_BALANCE_DEF.url}" target="_blank" rel="noopener">금융감독원 일일 금융시장 동향 원자료 ↗</a></p>
     </div>
     <div class="card">
       <div class="card-head">
