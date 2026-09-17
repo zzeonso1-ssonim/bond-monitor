@@ -2232,8 +2232,11 @@ function renderFlows() {
     const detailRows = bucketOrder.map((b) => ({ bucket: b, value: byBucket.get(b) ?? 0 }));
     const topBuy = [...detailRows].filter((r) => r.value > 0).sort((a, b) => b.value - a.value)[0];
     const topSell = [...detailRows].filter((r) => r.value < 0).sort((a, b) => a.value - b.value)[0];
-    const imported = latestRows[0]?.imported_at?.slice(0, 16).replace("T", " ") || "—";
-    $("#fl-sub", root).textContent = `기준일 ${latest} · ${investorSel.value} · ${scopeSel.value} · 마지막 적재 ${imported}`;
+    const importedAt = latestRows[0]?.imported_at;
+    const imported = importedAt && Number.isFinite(Date.parse(importedAt))
+      ? new Date(importedAt).toLocaleString("sv-SE", { timeZone: "Asia/Seoul" }).slice(0, 16)
+      : "—";
+    $("#fl-sub", root).textContent = `기준일 ${latest} · ${investorSel.value} · ${scopeSel.value} · 마지막 적재 ${imported} KST`;
     $("#fl-maturity-sub", root).textContent = `기준일 ${latest} · 절대 순매수 규모가 큰 구간 순 · 단위 조원`;
 
     const tiles = $("#fl-tiles", root); tiles.innerHTML = "";
