@@ -2006,6 +2006,7 @@ function renderInvestorComparison(root) {
 function renderFlows() {
   const root = $("#view-flows");
   root.innerHTML = `
+    <p class="section-sub" id="fl-source-status"></p>
     <div class="section-title">자금·보유잔고 추이</div>
     <div class="card">
       <div class="card-head"><h2>외국인 채권잔고·원/달러 환율 일간 추이</h2><span class="hint">당월 일별</span></div>
@@ -2123,6 +2124,26 @@ function renderFlows() {
       <p class="hint">회의일 출처: ${MPC_MEETINGS_META.source} · 수집 ${MPC_MEETINGS_META.as_of}
         · ${MPC_MEETINGS_META.caveat}</p>
     </div>`;
+
+  // 탭 안의 원천은 갱신 주기가 다르다. 전체 앱 기준일을 모든 수급 자료의 기준일로 오해하지 않도록 표시한다.
+  const latestDate = (rows) => rows.reduce((last, row) => row.trade_date > last ? row.trade_date : last, "");
+  const sourceDates = [
+    ["인포맥스 현물", latestDate(S.spotFlows)],
+    ["KOFIA 투자주체", latestDate(S.flows)],
+    ["KRX 선물 시세", latestDate(S.futures)],
+    ["외국인 선물 순매수", latestDate(S.futFrg)],
+    ["펀드·MMF", LIQUIDITY_DEFS.map((def) => marketPoints(def.symbol).at(-1)?.d || "")
+      .reduce((oldest, date) => !oldest || date < oldest ? date : oldest, "")],
+  ];
+  const delayed = sourceDates.filter(([, date]) => !date || S.asof && date < S.asof);
+  const status = $("#fl-source-status", root);
+  status.textContent = `원천별 기준일: ${sourceDates.map(([name, date]) => `${name} ${date || "미수집"}`).join(" · ")}`;
+  if (delayed.length) {
+    const warning = document.createElement("strong");
+    warning.className = "stale-warn";
+    warning.textContent = ` · ${delayed.map(([name]) => name).join("·")} 최신 원천 지연`;
+    status.appendChild(warning);
+  }
 
   renderLiquidity(root);
   renderForeignBalance(root);
