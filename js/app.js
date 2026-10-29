@@ -259,6 +259,7 @@ function renderMonitor() {
   mon.a = mon.b = null;
   const root = $("#view-monitor");
   root.innerHTML = `
+    <p class="hint">국내 금리: KOFIA 시가평가 4사 평균 · 인포맥스 4743 수집 · 매일 18:40 자동 작업(수집 PC 실행·로그인 필요)</p>
     <div class="tile-row" id="mon-tiles"></div>
     <div class="card">
       <div class="card-head">
