@@ -1499,7 +1499,7 @@ function renderForeignBalance(root) {
   dualLineChart($("#foreign-balance-chart", root), {
     left: { name: "잔고(좌)", cssVar: FOREIGN_BALANCE_DEF.cssVar, points: balancePoints },
     right: { name: "원/달러(우)", cssVar: "--series-1", points: fxPoints },
-  }, { leftUnit: "조원", rightUnit: "원", leftDigits: 1, rightDigits: 1 });
+  }, { leftUnit: "조원", rightUnit: "원", leftDigits: 1, rightDigits: 1, dayLabels: true });
 }
 
 

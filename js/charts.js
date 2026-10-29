@@ -581,7 +581,7 @@ export function dualLineChart(container, data, opts = {}) {
   dates.forEach((date, i) => {
     if (i % stride && i !== dates.length - 1) return;
     const label = el("text", { x: x(i), y: H - 8, "text-anchor": "middle", "font-size": 11, fill: "var(--muted)" });
-    label.textContent = singleMonth ? `${+date.slice(5, 7)}.${date.slice(8, 10)}` : fmtDateShort(date);
+    label.textContent = singleMonth || opts.dayLabels ? `${+date.slice(5, 7)}.${date.slice(8, 10)}` : fmtDateShort(date);
     svg.appendChild(label);
   });
   svg.appendChild(el("line", { x1: M.l, x2: W - M.r, y1: H - M.b, y2: H - M.b, stroke: "var(--baseline)", "stroke-width": 1 }));

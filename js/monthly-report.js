@@ -170,7 +170,7 @@ function render(root,data,points,month) {
   spreadChart('mr-us','MR_US02Y','MR_US10Y','미국 2년','미국 10년');
   lineChart(chart('mr-global'),OVERSEAS.slice(0,4).map(([name,key],i)=>({name:name+' 10년',cssVar:COLORS[i],points:pts(key)})),{unit:'%',digits:2});
   const {balance,fx}=foreignChart;
-  dualLineChart(chart('mr-balance'),{left:{name:'외국인 잔고',cssVar:'--series-6',points:balance},right:{name:'원/달러',cssVar:COLORS[0],points:fx}},{leftUnit:'조원',rightUnit:'원',leftDigits:1,rightDigits:1});
+  dualLineChart(chart('mr-balance'),{left:{name:'외국인 잔고',cssVar:'--series-6',points:balance},right:{name:'원/달러',cssVar:COLORS[0],points:fx}},{leftUnit:'조원',rightUnit:'원',leftDigits:1,rightDigits:1,dayLabels:true});
   lineChart(chart('mr-funds'),HOLDINGS.slice(1).map(([name,key],i)=>({name,cssVar:COLORS[i],points:pts(key)})),{unit:'조원',digits:1});
   const months=Array.from({length:12},(_,i)=>shiftMonth(month,i-11));
   barChart(chart('mr-institutions'),months.map(m=>m.slice(2)),[...INSTITUTIONS,'외국인'].map((name,i)=>({name:name==='투신'?'투신(공모)':name,cssVar:COLORS[i],values:months.map(m=>monthlySpot(data.spot,name,m+'-01',m===month?r.end:monthEnd(m))?.v??null)})),{unit:'조원',digits:2});
