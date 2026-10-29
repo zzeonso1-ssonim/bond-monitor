@@ -56,7 +56,7 @@ export function nearbySeries(rows, product) {
     const old = days.get(r.trade_date);
     if (!old || old.volume < r.volume || old.volume === r.volume && r.isu_cd < old.isu_cd) days.set(r.trade_date, r);
   }
-  return [...days.values()].sort((a,b)=>a.trade_date.localeCompare(b.trade_date)).map(r=>({d:r.trade_date,v:r.close_price,contract:r.isu_nm}));
+  return [...days.values()].sort((a,b)=>a.trade_date.localeCompare(b.trade_date)).map(r=>({d:r.trade_date,v:r.close_price,contract:r.isu_nm,...(r.source?{source:r.source}:{})}));
 }
 function indexData(data) {
   const points = new Map();
@@ -71,7 +71,7 @@ function metric(points, r, multiplier = 1) {
   const current = observation(points,r.start,r.end), previous = observation(points,r.previousStart,r.previousEnd);
   return {current, previous, delta:current && previous ? (current.v - previous.v) * multiplier : null};
 }
-function pointCell(p,digits) { return p ? `${fmt(p.v,digits)}<small>${esc(p.d)}${p.contract ? ' · '+esc(p.contract.trim()) : ''}</small>` : '—<small>해당 월 자료 없음</small>'; }
+function pointCell(p,digits) { return p ? `${fmt(p.v,digits)}<small>${esc(p.d)}${p.contract ? ' · '+esc(p.contract.trim()) : ''}${p.source?' · '+esc(p.source):''}</small>` : '—<small>해당 월 자료 없음</small>'; }
 function rateTable(defs, points, range, domestic = false) {
   const cells = defs.map(([name,key])=>({name,key,...metric(points.get(key)||[],range,key.startsWith('KTB')?1:100)}));
   return {cells, html:`<div class="table-scroll"><table class="data monthly-rates"><thead><tr><th>구분</th>${cells.map(c=>`<th>${esc(c.name)}${domestic?'':' 10년'}</th>`).join('')}</tr></thead><tbody>
@@ -136,11 +136,11 @@ function render(root,data,points,month) {
   const latestDate=items=>{const d=items.map(c=>c.current?.d).filter(Boolean).sort();return !d.length?'해당 월 자료 없음':d[0]===d.at(-1)?d[0]:`${d[0]}~${d.at(-1)}`;};
   const sourceStatus=`실제 기준일 · 국내 금리 ${latestDate(domestic.cells.filter(c=>!c.key.startsWith('KTB')))} · 해외 금리 ${latestDate(overseas.cells)} · 선물 종가 ${latestDate(domestic.cells.filter(c=>c.key.startsWith('KTB')))} · 현물 수급 ${latestDate([flow.foreign[0],...flow.domestic])} · 수탁고 ${latestDate(holdings.slice(1))}`;
   root.querySelector('#mr-content').innerHTML=`<p class="note"><strong>${month} · ${r.partial?'월중 잠정':'월말'} 보고서</strong> · 조회 한도 ${r.end} · 국내 금리 민평 4사 · 금리 변동은 전월말 대비 bp, 선물 가격은 pt. 휴일·공표 시차가 있어 지표별 실제 관측일을 함께 표시합니다.</p>
-    <p class="hint monthly-status">${sourceStatus}</p><h2 class="section-title">국내 금리</h2>${domestic.html}<p class="hint">국채선물은 거래량 최대 종목의 종가이며 계약 교체가 포함됩니다. 표의 실제 종목명을 확인하세요.</p>
+    <p class="hint monthly-status">${sourceStatus}</p><h2 class="section-title">국내 금리</h2>${domestic.html}<p class="hint">국채선물은 KRX 정규장 종가(인포맥스 경유 포함), 거래량 최대 종목 기준이며 계약 교체가 포함됩니다. 표의 실제 종목과 출처를 확인하세요.</p>
     <div class="monthly-grid">${chartBox('mr-curve','기간 스프레드 · 국고 10년−3년','금리 좌축 %, 스프레드 우축 bp · 최근 12개월')}${chartBox('mr-credit','크레딧 스프레드 · 은행채 AAA 3년−국고 3년','민평 4사 · 금리 좌축 %, 스프레드 우축 bp')}</div>
     <h2 class="section-title">해외 금리</h2>${overseas.html}<p class="hint">해외는 인포맥스 BID_Close 종가(%), 한국은 국내 표와 같은 민평 4사입니다. 현지 시장별 관측일이 다를 수 있습니다.</p>
     <div class="monthly-grid">${chartBox('mr-us','미국채 10년−2년 스프레드','금리 좌축 %, 스프레드 우축 bp')}${chartBox('mr-global','주요국 10년 금리','미국·영국·독일·호주 · %')}</div>
-    <h2 class="section-title">외국인 수급 · 현물과 선물</h2>${summaryTable(flow.foreign,r)}<p class="hint">현물은 인포맥스 4668 전체채권 순매수거래량(액면), 선물은 KRX 외국인 순매수 계약 수입니다. ${r.partial?'이번 달 누계와 전월 전체를 비교하므로 기간 길이가 다릅니다.':'두 달 모두 월간 전체 누계입니다.'}</p>
+    <h2 class="section-title">외국인 수급 · 현물과 선물</h2>${summaryTable(flow.foreign,r)}<p class="hint">현물은 인포맥스 4668 전체채권 순매수거래량(액면), 선물은 KRX 외국인 합계 순매수 계약 수(인포맥스 경유 포함)입니다. ${r.partial?'이번 달 누계와 전월 전체를 비교하므로 기간 길이가 다릅니다.':'두 달 모두 월간 전체 누계입니다.'}</p>
     <h2 class="section-title">국내 주요기관 수급</h2>${summaryTable(flow.domestic,r)}<p class="hint">인포맥스 4668 월간 액면 순매수 · 투신(공모)과 기금·공제는 인포맥스 분류 · 일별로 저장된 월간 누계를 중복 합산하지 않습니다.</p>
     <h2 class="section-title">외국인 잔고 · 펀드 수탁고</h2><div class="table-scroll"><table class="data"><thead><tr><th>지표 (조원)</th><th>${month} ${r.partial?'최신':'월말'}</th><th>${r.previous} 월말</th><th>전월말 대비 증감 (조원)</th></tr></thead><tbody>${holdings.map(c=>`<tr><th>${c.name}</th><td>${pointCell(c.current,2)}</td><td>${pointCell(c.previous,2)}</td><td class="${deltaClass(c.delta)}">${signed(c.delta)}</td></tr>`).join('')}</tbody></table></div>
     <p class="hint">외국인 잔고: 금감원 당일 만기상환 반영 상장채권 잔고 · 펀드: FreeSIS 설정원본(수탁고). 잔고와 설정원본은 합산하지 않습니다.</p>
@@ -167,7 +167,7 @@ function render(root,data,points,month) {
     catch {root.querySelector('#mr-prose').select();button.textContent='요약을 선택했습니다';}
   };
   root.querySelector('#mr-csv').onclick=()=>{
-    const all=[...domestic.cells.map(c=>({...c,unit:c.key.startsWith('KTB')?'pt':'%',deltaUnit:c.key.startsWith('KTB')?'pt':'bp',source:c.key.startsWith('KTB')?'KRX 정규장 종가':'인포맥스 KOFIA4'})),...overseas.cells.map(c=>({...c,name:c.name+' 10년',unit:'%',deltaUnit:'bp',source:c.key.startsWith('MR_')?'인포맥스 BID_Close':'인포맥스 KOFIA4'})),...flow.foreign.map(c=>({...c,source:c.unit==='계약'?'KRX 외국인 순매수':'인포맥스 현물 액면'})),...flow.domestic.map(c=>({...c,source:'인포맥스 현물 액면'})),...holdings.map((c,i)=>({...c,source:i?'FreeSIS 설정원본':'금감원 상장채권 잔고'}))];
+    const all=[...domestic.cells.map(c=>({...c,unit:c.key.startsWith('KTB')?'pt':'%',deltaUnit:c.key.startsWith('KTB')?'pt':'bp',source:c.key.startsWith('KTB')?`KRX 정규장 종가${c.current?.source?' / '+c.current.source:''}`:'인포맥스 KOFIA4'})),...overseas.cells.map(c=>({...c,name:c.name+' 10년',unit:'%',deltaUnit:'bp',source:c.key.startsWith('MR_')?'인포맥스 BID_Close':'인포맥스 KOFIA4'})),...flow.foreign.map(c=>({...c,source:c.unit==='계약'?'KRX 외국인 순매수 (인포맥스 경유 포함)':'인포맥스 현물 액면'})),...flow.domestic.map(c=>({...c,source:'인포맥스 현물 액면'})),...holdings.map((c,i)=>({...c,source:i?'FreeSIS 설정원본':'금감원 상장채권 잔고'}))];
     const lines=[['보고서월','지표','단위','당월값','당월실제관측일','전월값','전월실제관측일','증감','증감단위','비교기준','출처'],...all.map(c=>[month,c.name,c.unit,c.current?.v??'',c.current?.d??'',c.previous?.v??'',c.previous?.d??'',c.delta??'',c.deltaUnit||c.unit,c.unit==='계약'||c.name.includes('순매수')?'전월 전체 대비':'전월말 대비',c.source])];
     const blob=new Blob(['\uFEFF'+lines.map(row=>row.map(v=>'"'+String(v).replaceAll('"','""')+'"').join(',')).join('\r\n')],{type:'text/csv;charset=utf-8'});
     const link=document.createElement('a');link.href=URL.createObjectURL(blob);link.download=`본드모니터_월간보고서_${month}.csv`;link.click();setTimeout(()=>URL.revokeObjectURL(link.href),1000);

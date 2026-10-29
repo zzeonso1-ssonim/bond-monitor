@@ -1521,7 +1521,7 @@ function renderFlowsFutures(root) {
     const wkDate = fDates.length > 5 ? fDates[fDates.length - 6] : null;
     const foreignDate = S.futFrg[S.futFrg.length - 1]?.trade_date || "—";
     $("#fl-fut-sub", root).textContent =
-      `시세 기준일 ${latest} · 근월물(거래량 최대) · 외국인 순매수 기준일 ${foreignDate}`;
+      `시세 기준일 ${latest} · 근월물(거래량 최대) · KRX/인포맥스 정규장 · 외국인 순매수 기준일 ${foreignDate}`;
     const todays = S.futures.filter((r) => r.trade_date === latest);
     const wkRows = wkDate ? S.futures.filter((r) => r.trade_date === wkDate) : [];
     for (const prod of Object.keys(FUT_NAMES)) {
@@ -1601,7 +1601,7 @@ function renderFlowsFutures(root) {
         .filter((d) => S.asof && d <= S.asof);
       const lag = latest ? bizDays.filter((d) => d > latest).length : null;
       const sub = $("#fl-frg-sub", root);
-      sub.textContent = `KRX 파생 투자자별 거래실적 · 계약 수 기준 · 기준일 ${latest}`;
+      sub.textContent = `KRX 파생 투자자별 거래실적(인포맥스 경유 포함) · 계약 수 기준 · 기준일 ${latest}`;
       if (lag) {
         const warn = document.createElement("span");
         warn.className = "stale-warn";

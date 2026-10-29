@@ -65,7 +65,24 @@ export async function loadMonthlyReportData() {
     fetchPaged('infomax_spot_flows?select=trade_date,investor,maturity_bucket,net_buy_krw_thousand&period=eq.monthly&market_scope=eq.전체채권' + `&trade_date=gte.${from}&order=trade_date.asc,investor.asc,maturity_bucket.asc`),
     fetchPaged('market_daily?select=trade_date,symbol,value&symbol=in.(KTB3F_FRG,KTB10F_FRG)' + `&trade_date=gte.${from}&order=trade_date.asc,symbol.asc`),
   ]);
-  return { rates, market, futures, spot, foreignFutures };
+  return { rates, market, futures:mergeInfomaxFutures(futures,market), spot, foreignFutures };
+}
+
+// Keep the original KRX rows where a liquid contract exists. The Infomax
+// regular-session distribution supplies newer dates without relabeling its IDs.
+export function mergeInfomaxFutures(krx, market) {
+  const values=new Map(market.map(r=>[`${r.symbol}|${r.trade_date}`,r.value]));
+  const covered=new Set(krx.filter(r=>typeof r.close_price==='number'&&Number.isFinite(r.close_price)&&r.volume>0).map(r=>`${r.prod}|${r.trade_date}`));
+  const extra=[];
+  for (const r of market) {
+    const m=/^MR_(KTB3|KTB10)_(\d{6})_([A-Z0-9]+)_C$/.exec(r.symbol);
+    if (!m || covered.has(`${m[1]}|${r.trade_date}`)) continue;
+    const volume=values.get(`${r.symbol.slice(0,-1)}V|${r.trade_date}`);
+    if (typeof r.value!=='number'||!Number.isFinite(r.value)||r.value<=0||typeof volume!=='number'||!Number.isFinite(volume)||volume<0) continue;
+    const optional=suffix=>values.get(`${r.symbol.slice(0,-1)}${suffix}|${r.trade_date}`)??null;
+    extra.push({trade_date:r.trade_date,prod:m[1],isu_cd:'IMX_'+m[3],isu_nm:`${m[1]==='KTB3'?'3':'10'}년국채 F ${m[2]}`,close_price:r.value,volume,open_int:optional('O'),settle:optional('S'),change:optional('D'),source:'인포맥스'});
+  }
+  return [...krx,...extra];
 }
 
 // web_meta 화면 구성 메타 (key='bond-monitor', 파이프라인 specs.py 가 단일 소스)
@@ -143,11 +160,12 @@ async function fetchRecentSafe(path) {
 }
 
 // KRX 국채선물 일별 (근월물 판별은 화면에서 volume 기준)
-export function loadKrxFutures(days = 30) {
-  return fetchRecentSafe(
+export async function loadKrxFutures(days = 30) {
+  const [krx,market]=await Promise.all([fetchRecentSafe(
     "krx_futures_daily?select=trade_date,isu_cd,isu_nm,prod,close_price,change,settle,open_int,volume" +
       `&trade_date=gte.${sinceISO(days)}&order=trade_date.asc`
-  );
+  ),fetchRecentSafe('market_daily?select=trade_date,symbol,value&symbol=like.MR_KTB*'+`&trade_date=gte.${sinceISO(days)}&order=trade_date.asc,symbol.asc`)]);
+  return mergeInfomaxFutures(krx,market);
 }
 
 // KOFIA 투자자별 거래현황(수급동향, 억원) — 테이블 미생성·미적재 시 빈 배열
