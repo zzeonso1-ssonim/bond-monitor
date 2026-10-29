@@ -1484,11 +1484,11 @@ function renderForeignBalance(root) {
   const points = marketPoints(FOREIGN_BALANCE_DEF.symbol);
   const last = points[points.length - 1] || null;
   const prev = points.length > 1 ? points[points.length - 2] : null;
-  $("#foreign-balance-current", root).textContent = last ? last.v.toFixed(1) : "—";
+  $("#foreign-balance-current", root).textContent = last ? last.v.toFixed(4) : "—";
   $("#foreign-balance-date", root).textContent = last ? `최신 ${last.d}` : "최신";
   const change = last && prev ? last.v - prev.v : null;
   const changeEl = $("#foreign-balance-change", root);
-  changeEl.textContent = change == null ? "—" : `${fmtSigned(change, 1)}조원`;
+  changeEl.textContent = change == null ? "—" : `${fmtSigned(change, 4)}조원`;
   changeEl.className = "t-value";
   if (change > 0) changeEl.classList.add("delta-up");
   else if (change < 0) changeEl.classList.add("delta-dn");
