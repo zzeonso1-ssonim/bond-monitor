@@ -53,6 +53,21 @@ async function fetchPaged(path) {
   return out;
 }
 
+// 월간 보고서는 탭을 열 때만 선택 지표의 이력을 가져온다.
+// private fc_* 테이블은 브라우저에 노출하지 않으며, 보고서용 공개 시장값만 읽는다.
+export async function loadMonthlyReportData() {
+  const now = new Date(Date.now() + 9 * 3600000);
+  const from = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth() - 16, 1)).toISOString().slice(0, 10);
+  const [rates, market, futures, spot, foreignFutures] = await Promise.all([
+    fetchPaged('bond_spread_daily?select=trade_date,label,yield&label=in.(국고채 1년,국고채 2년,국고채 3년,국고채 5년,국고채 10년,국고채 30년,은행채 AAA 3년)' + `&trade_date=gte.${from}&order=trade_date.asc,label.asc`),
+    fetchPaged('market_daily?select=trade_date,symbol,value&or=(symbol.like.MR_*,symbol.in.(USDKRW,FOREIGN_LISTED_BOND_BAL,FUND_STOCK_AUM,FUND_BOND_AUM,MMF_AUM))' + `&trade_date=gte.${from}&order=trade_date.asc,symbol.asc`),
+    fetchPaged('krx_futures_daily?select=trade_date,isu_cd,isu_nm,prod,close_price,volume&prod=in.(KTB3,KTB10)' + `&trade_date=gte.${from}&order=trade_date.asc,isu_cd.asc`),
+    fetchPaged('infomax_spot_flows?select=trade_date,investor,maturity_bucket,net_buy_krw_thousand&period=eq.monthly&market_scope=eq.전체채권' + `&trade_date=gte.${from}&order=trade_date.asc,investor.asc,maturity_bucket.asc`),
+    fetchPaged('market_daily?select=trade_date,symbol,value&symbol=in.(KTB3F_FRG,KTB10F_FRG)' + `&trade_date=gte.${from}&order=trade_date.asc,symbol.asc`),
+  ]);
+  return { rates, market, futures, spot, foreignFutures };
+}
+
 // web_meta 화면 구성 메타 (key='bond-monitor', 파이프라인 specs.py 가 단일 소스)
 // 테이블 미생성(404)·행 없음·네트워크 오류 시 null 반환 → 호출부가 config.js 폴백 사용
 export async function loadWebMeta() {

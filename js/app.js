@@ -14,6 +14,7 @@ import {
 } from "./api.js";
 import { lineChart, regimeRangeChart, dualLineChart, dualSpreadChart, barChart } from "./charts.js";
 import { downloadWeeklyReportPdf } from "./report-pdf.js";
+import { openMonthlyReport } from "./monthly-report.js";
 
 const $ = (sel, root = document) => root.querySelector(sel);
 
@@ -117,6 +118,7 @@ $("#tabs").addEventListener("click", (e) => {
   if (!btn) return;
   for (const t of document.querySelectorAll(".tab")) t.classList.toggle("active", t === btn);
   for (const v of document.querySelectorAll(".view")) v.classList.toggle("active", v.id === `view-${btn.dataset.view}`);
+  if (btn.dataset.view === 'monthly') openMonthlyReport(document.querySelector('#view-monthly'));
 });
 
 /* ══ PDF — 버튼은 최신 데이터로 주간 2쪽 파일 직다운로드. Ctrl+P는 현재 탭 인쇄 유지 ══ */
@@ -2369,3 +2371,4 @@ async function main() {
     renderOfferings);
 }
 main();
+if (location.hash === '#monthly') document.querySelector('[data-view="monthly"]').click();
