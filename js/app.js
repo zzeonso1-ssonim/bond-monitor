@@ -261,7 +261,7 @@ function renderMonitor() {
   mon.a = mon.b = null;
   const root = $("#view-monitor");
   root.innerHTML = `
-    <p class="hint">국내 금리: KOFIA 시가평가 4사 평균 · 인포맥스 4743 수집 · 매일 18:40 자동 작업(수집 PC 실행·로그인 필요)</p>
+    <p class="hint">국내 금리: KOFIA 시가평가 4사 평균 · 인포맥스 4743 수집 · 매일 09:30·18:40 자동 작업(수집 PC 실행·로그인 필요)</p>
     <div class="tile-row" id="mon-tiles"></div>
     <div class="card">
       <div class="card-head">
@@ -938,7 +938,7 @@ const FUT_NAMES = { KTB3: "3년 국채선물", KTB5: "5년 국채선물", KTB10:
 function renderIssue() {
   const root = $("#view-issue");
   root.innerHTML = `
-    <p class="hint">KOFIA FreeSIS 발행·만기 · 단위 억원 · 전일까지 조회, 매일 09:30·20:00 자동 수집 · 특은채는 인포맥스 4236의 5개 은행 합계(18:40) · 2026-10-20 전환 이전 공표값은 보존되어 정정 차이가 있을 수 있습니다.</p>
+    <p class="hint">KOFIA FreeSIS 발행·만기 · 단위 억원 · 전일까지 조회, 매일 09:30·18:40 PC 자동 수집 · 특은채는 인포맥스 4236의 5개 은행 합계(같은 PC 작업) · 2026-10-20 전환 이전 공표값은 보존되어 정정 차이가 있을 수 있습니다.</p>
     <div class="section-title">발행통계 (금주)</div>
     <p class="section-sub" id="wk-iss-sub">억원 · 최근 5영업일 합산, 전주 = 그 직전 5영업일</p>
     <div class="table-scroll"><table class="data">
@@ -2070,7 +2070,7 @@ function renderFlows() {
     </div>
     <div class="section-title">투자주체·채권종류 비교</div>
     <p class="section-sub" id="fl-compare-sub"></p>
-    <p class="hint">KOFIA FreeSIS 장외 거래대금(억원) · 전일까지 조회, 매일 09:30·20:00 자동 수집 · 선물회사는 세부 단위의 합계 차감으로 산출하며 반올림이 확정되는 값만 적재 · 인포맥스 만기별 수급과 합산하지 않음</p>
+    <p class="hint">KOFIA FreeSIS 장외 거래대금(억원) · 전일까지 조회, 매일 09:30·18:40 PC 자동 수집 · 선물회사는 세부 단위의 합계 차감으로 산출하며 반올림이 확정되는 값만 적재 · 인포맥스 만기별 수급과 합산하지 않음</p>
     <div class="section-title">투자자 × 채권종류 일간 순매수</div>
     <p class="hint" id="fl-matrix-sub">최신 기준일 하루(1영업일) · 단위 억원</p>
     <div class="table-scroll" id="fl-matrix"></div>
