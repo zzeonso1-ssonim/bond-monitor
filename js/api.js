@@ -58,14 +58,15 @@ async function fetchPaged(path) {
 export async function loadMonthlyReportData() {
   const now = new Date(Date.now() + 9 * 3600000);
   const from = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth() - 16, 1)).toISOString().slice(0, 10);
-  const [rates, market, futures, spot, foreignFutures] = await Promise.all([
+  const [rates, market, futures, spot, foreignFutures, research] = await Promise.all([
     fetchPaged('bond_spread_daily?select=trade_date,label,yield&label=in.(국고채 1년,국고채 2년,국고채 3년,국고채 5년,국고채 10년,국고채 30년,은행채 AAA 3년)' + `&trade_date=gte.${from}&order=trade_date.asc,label.asc`),
     fetchPaged('market_daily?select=trade_date,symbol,value&or=(symbol.like.MR_*,symbol.in.(USDKRW,FOREIGN_LISTED_BOND_BAL,FUND_STOCK_AUM,FUND_BOND_AUM,MMF_AUM))' + `&trade_date=gte.${from}&order=trade_date.asc,symbol.asc`),
     fetchPaged('krx_futures_daily?select=trade_date,isu_cd,isu_nm,prod,close_price,volume&prod=in.(KTB3,KTB10)' + `&trade_date=gte.${from}&order=trade_date.asc,isu_cd.asc`),
     fetchPaged('infomax_spot_flows?select=trade_date,investor,maturity_bucket,net_buy_krw_thousand&period=eq.monthly&market_scope=eq.전체채권' + `&trade_date=gte.${from}&order=trade_date.asc,investor.asc,maturity_bucket.asc`),
-    fetchPaged('market_daily?select=trade_date,symbol,value&symbol=in.(KTB3F_FRG,KTB10F_FRG)' + `&trade_date=gte.${from}&order=trade_date.asc,symbol.asc`),
+    fetchPaged('market_daily?select=trade_date,symbol,value&symbol=in.(KTB3F_FRG,KTB10F_FRG)&order=trade_date.asc,symbol.asc'),
+    fetchPaged('web_meta?select=payload&key=eq.bond-monitor-futures-rankings').catch(()=>[]),
   ]);
-  return { rates, market, futures:mergeInfomaxFutures(futures,market), spot, foreignFutures };
+  return { rates, market, futures:mergeInfomaxFutures(futures,market), spot, foreignFutures, futuresResearch:research[0]?.payload??null };
 }
 
 // Keep the original KRX rows where a liquid contract exists. The Infomax

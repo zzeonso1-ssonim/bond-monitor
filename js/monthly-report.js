@@ -1,5 +1,6 @@
 import { loadMonthlyReportData } from './api.js';
 import { lineChart, dualSpreadChart, dualLineChart, barChart } from './charts.js';
+import { futuresRankingSection } from './futures-rankings.js';
 
 const COLORS = ['--series-1', '--series-2', '--series-6', '--series-5', '--series-4'];
 export const DOMESTIC = [
@@ -129,6 +130,7 @@ function render(root,data,points,month) {
   root.querySelector('#mr-copy').textContent='요약 복사';
   const r=reportingRange(month), domestic=rateTable(DOMESTIC,points,r,true), overseas=rateTable(OVERSEAS,points,r);
   const flow=flowMetrics(data,points,r);
+  const rankings=futuresRankingSection(data,r.end,r.partial);
   const holdings=HOLDINGS.map(([name,key])=>({name,key,unit:'조원',...metric(points.get(key)||[],r)}));
   const from=shiftMonth(month,-11)+'-01';
   const pts=key=>(points.get(key)||[]).filter(p=>p.d>=from&&p.d<=r.end&&finite(p.v));
@@ -141,6 +143,7 @@ function render(root,data,points,month) {
     <h2 class="section-title">해외 금리</h2>${overseas.html}<p class="hint">해외는 인포맥스 BID_Close 종가(%), 한국은 국내 표와 같은 민평 4사입니다. 현지 시장별 관측일이 다를 수 있습니다.</p>
     <div class="monthly-grid">${chartBox('mr-us','미국채 10년−2년 스프레드','금리 좌축 %, 스프레드 우축 bp')}${chartBox('mr-global','주요국 10년 금리','미국·영국·독일·호주 · %')}</div>
     <h2 class="section-title">외국인 수급 · 현물과 선물</h2>${summaryTable(flow.foreign,r)}<p class="hint">현물은 인포맥스 4668 전체채권 순매수거래량(액면), 선물은 KRX 외국인 합계 순매수 계약 수(인포맥스 경유 포함)입니다. ${r.partial?'이번 달 누계와 전월 전체를 비교하므로 기간 길이가 다릅니다.':'두 달 모두 월간 전체 누계입니다.'}</p>
+    ${rankings.html||rankings}
     <h2 class="section-title">국내 주요기관 수급</h2>${summaryTable(flow.domestic,r)}<p class="hint">인포맥스 4668 월간 액면 순매수 · 투신(공모)과 기금·공제는 인포맥스 분류 · 일별로 저장된 월간 누계를 중복 합산하지 않습니다.</p>
     <h2 class="section-title">외국인 잔고 · 펀드 수탁고</h2><div class="table-scroll"><table class="data"><thead><tr><th>지표 (조원)</th><th>${month} ${r.partial?'최신':'월말'}</th><th>${r.previous} 월말</th><th>전월말 대비 증감 (조원)</th></tr></thead><tbody>${holdings.map(c=>`<tr><th>${c.name}</th><td>${pointCell(c.current,2)}</td><td>${pointCell(c.previous,2)}</td><td class="${deltaClass(c.delta)}">${signed(c.delta)}</td></tr>`).join('')}</tbody></table></div>
     <p class="hint">외국인 잔고: 금감원 당일 만기상환 반영 상장채권 잔고 · 펀드: FreeSIS 설정원본(수탁고). 잔고와 설정원본은 합산하지 않습니다.</p>
@@ -148,6 +151,12 @@ function render(root,data,points,month) {
     ${chartBox('mr-institutions','투자주체별 월간 현물 순매수',`은행·투신·보험·기금·외국인 · 조원 · ${r.partial?month+'은 월중 누계':'월말 누계'}`)}
     <h2 class="section-title">보고서용 수급 요약</h2><p class="hint">관측값으로 만든 초안입니다. 시장 원인을 추정하지 않으며 비교 기준을 명시합니다.</p><textarea id="mr-prose" class="monthly-prose" readonly aria-label="보고서용 수급 요약"></textarea>`;
   const proseBox=root.querySelector('#mr-prose');
+  const rankCsv=root.querySelector('#mr-rank-csv');
+  if(rankCsv) rankCsv.onclick=()=>{
+    const lines=[['상품','순위','월','순매수_계약','집계시작','집계종료','거래일수','집계구분','조회한도','출처'],...rankings.rows.map(m=>[m.product,m.rank,m.month,m.net,m.first,m.last,m.days,m.provisional?'월중 잠정':'월 전체',r.end,'본드모니터 KRX 계열 (최근 인포맥스 경유)'])];
+    const blob=new Blob(['\uFEFF'+lines.map(row=>row.map(v=>'"'+String(v).replaceAll('"','""')+'"').join(',')).join('\r\n')],{type:'text/csv;charset=utf-8'});
+    const link=document.createElement('a');link.href=URL.createObjectURL(blob);link.download=`국채선물_외국인_월간순매수_TOP5_${month}.csv`;link.click();setTimeout(()=>URL.revokeObjectURL(link.href),1000);
+  };
   proseBox.value=text;
   proseBox.style.height=Math.max(235,proseBox.scrollHeight+4)+'px';
   const chart=id=>root.querySelector('#'+id);
