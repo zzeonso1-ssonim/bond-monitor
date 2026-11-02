@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { reportingRange, kstYesterday, monthlySpot, monthlySum, nearbySeries, observation } from '../js/monthly-report.js';
+import { reportingRange, latestReportMonth, kstYesterday, monthlySpot, monthlySum, nearbySeries, observation } from '../js/monthly-report.js';
 
 test('KST cutoff uses yesterday and a closed month uses its calendar month end',()=>{
   const now=new Date('2026-10-28T23:00:00Z');
@@ -39,4 +39,19 @@ test('month-end observation never carries an old month forward as a new observat
   const rows=[{d:'2026-08-31',v:3},{d:'2026-09-29',v:4},{d:'2026-10-29',v:9}];
   assert.deepEqual(observation(rows,'2026-09-01','2026-09-30'),{d:'2026-09-29',v:4});
   assert.equal(observation(rows,'2026-10-01','2026-10-28'),null);
+});
+
+test('October 2026 closes on Friday 30, not Saturday 31, and opens the latest populated month',()=>{
+  const now=new Date('2026-11-02T00:00:00Z');
+  const days=[{d:'2026-09-29',v:3},{d:'2026-10-29',v:3.6},{d:'2026-10-30',v:3.71},{d:'2026-11-02',v:4}];
+  const r=reportingRange('2026-10',now,days);
+  assert.equal(r.end,'2026-10-30');
+  assert.equal(r.previousEnd,'2026-09-29');
+  assert.equal(r.partial,false);
+  assert.equal(latestReportMonth(days,now),'2026-10');
+});
+test('holiday month-end uses observed last trading day, not just last weekday',()=>{
+  const days=[{d:'2026-09-28',v:3},{d:'2026-09-29',v:3.1}];
+  assert.equal(reportingRange('2026-09',new Date('2026-10-02T00:00:00Z'),days).end,'2026-09-29');
+  assert.equal(observation(days,'2026-10-01','2026-10-01'),null);
 });

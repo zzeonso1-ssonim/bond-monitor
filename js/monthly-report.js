@@ -30,13 +30,20 @@ const monthEnd = month => {
   const [y, m] = month.split('-').map(Number);
   return new Date(Date.UTC(y, m, 0)).toISOString().slice(0, 10);
 };
-export function reportingRange(month, today = new Date()) {
+// The domestic benchmark observations define actual trading days, including holidays.
+export function latestReportMonth(points, today = new Date()) {
+  const cap = kstYesterday(today);
+  return observation(points, '0000-01-01', cap)?.d.slice(0, 7) || cap.slice(0, 7);
+}
+export function reportingRange(month, today = new Date(), tradingPoints = []) {
   const cap = kstYesterday(today);
   if (!/^\d{4}-\d{2}$/.test(month) || month > cap.slice(0, 7)) throw new Error('조회 가능한 월을 선택하세요.');
   const previous = shiftMonth(month, -1);
-  const end = [monthEnd(month), cap].sort()[0];
-  return {month, start:month + '-01', end, previous, previousStart:previous + '-01',
-    previousEnd:monthEnd(previous), partial:end < monthEnd(month)};
+  const cutoff = [monthEnd(month), cap].sort()[0];
+  const last = observation(tradingPoints, month + '-01', cutoff);
+  const prior = observation(tradingPoints, previous + '-01', monthEnd(previous));
+  return {month, start:month + '-01', end:last?.d || cutoff, previous, previousStart:previous + '-01',
+    previousEnd:prior?.d || monthEnd(previous), partial:cutoff < monthEnd(month)};
 }
 export function observation(points, start, end) {
   return points.filter(p => p.d >= start && p.d <= end && finite(p.v)).sort((a,b) => a.d.localeCompare(b.d)).at(-1) || null;
@@ -77,7 +84,7 @@ function pointCell(p,digits) { return p ? `${fmt(p.v,digits)}<small>${esc(p.d)}$
 function rateTable(defs, points, range, domestic = false) {
   const cells = defs.map(([name,key])=>({name,key,...metric(points.get(key)||[],range,key.startsWith('KTB')?1:100)}));
   return {cells, html:`<div class="table-scroll"><table class="data monthly-rates"><thead><tr><th>구분</th>${cells.map(c=>`<th>${esc(c.name)}${domestic?'':' 10년'}</th>`).join('')}</tr></thead><tbody>
-    <tr><th>${range.previous} 월말</th>${cells.map(c=>`<td>${pointCell(c.previous,c.key.startsWith('KTB')?2:3)}</td>`).join('')}</tr>
+    <tr><th>${range.previous} 월말 · ${range.previousEnd}</th>${cells.map(c=>`<td>${pointCell(c.previous,c.key.startsWith('KTB')?2:3)}</td>`).join('')}</tr>
     <tr><th>${range.partial?'월중':'월말'} · ${range.end}</th>${cells.map(c=>`<td>${pointCell(c.current,c.key.startsWith('KTB')?2:3)}</td>`).join('')}</tr>
     <tr><th>전월말 대비</th>${cells.map(c=>`<td class="${deltaClass(c.delta)}">${signed(c.delta,c.key.startsWith('KTB')?2:1)}<small>${c.key.startsWith('KTB')?'pt':'bp'}</small></td>`).join('')}</tr></tbody></table></div>`};
 }
@@ -114,9 +121,10 @@ export async function openMonthlyReport(root) {
     if (!pending) pending=loadMonthlyReportData();
     loaded=await pending;
     root.dataset.ready='true';
-    const current=kstYesterday().slice(0,7);
-    root.innerHTML=`<div class="monthly-toolbar"><div><h2>월간 보고서</h2><p class="hint">보고서에 쓰는 금리·수급·잔고를 한곳에서 확인합니다.</p></div><label>보고서 월 <select id="mr-month" aria-label="보고서 월">${Array.from({length:12},(_,i)=>shiftMonth(current,-i)).map(m=>`<option value="${m}">${m}</option>`).join('')}</select></label><button id="mr-csv" class="pdf-btn">표 CSV</button><button id="mr-copy" class="pdf-btn">요약 복사</button></div><div id="mr-content"></div>`;
     const points=indexData(loaded);
+    const current=kstYesterday().slice(0,7);
+    const defaultMonth=latestReportMonth(points.get('국고채 3년')||[]);
+    root.innerHTML=`<div class="monthly-toolbar"><div><h2>월간 보고서</h2><p class="hint">보고서에 쓰는 금리·수급·잔고를 한곳에서 확인합니다.</p></div><label>보고서 월 <select id="mr-month" aria-label="보고서 월">${Array.from({length:12},(_,i)=>shiftMonth(current,-i)).map(m=>`<option value="${m}"${m===defaultMonth?' selected':''}>${m}</option>`).join('')}</select></label><button id="mr-csv" class="pdf-btn">표 CSV</button><button id="mr-copy" class="pdf-btn">요약 복사</button></div><div id="mr-content"></div>`;
     const draw=()=>render(root,loaded,points,root.querySelector('#mr-month').value);
     root.querySelector('#mr-month').addEventListener('change',draw);
     draw();
@@ -129,7 +137,7 @@ export async function openMonthlyReport(root) {
 }
 function render(root,data,points,month) {
   root.querySelector('#mr-copy').textContent='요약 복사';
-  const r=reportingRange(month), domestic=rateTable(DOMESTIC,points,r,true), overseas=rateTable(OVERSEAS,points,r);
+  const r=reportingRange(month,new Date(),points.get('국고채 3년')||[]), domestic=rateTable(DOMESTIC,points,r,true), overseas=rateTable(OVERSEAS,points,r);
   const flow=flowMetrics(data,points,r);
   const rankings=futuresRankingSection(data,r.end,r.partial);
   const foreignChart=balanceChartPoints(points.get(FOREIGN_BALANCE_SYMBOL)||[],points.get(FOREIGN_FX_SYMBOL)||[],r.end);
@@ -141,7 +149,7 @@ function render(root,data,points,month) {
   const text=prose(flow,holdings,r);
   const latestDate=items=>{const d=items.map(c=>c.current?.d).filter(Boolean).sort();return !d.length?'해당 월 자료 없음':d[0]===d.at(-1)?d[0]:`${d[0]}~${d.at(-1)}`;};
   const sourceStatus=`실제 기준일 · 국내 금리 ${latestDate(domestic.cells.filter(c=>!c.key.startsWith('KTB')))} · 해외 금리 ${latestDate(overseas.cells)} · 선물 종가 ${latestDate(domestic.cells.filter(c=>c.key.startsWith('KTB')))} · 현물 수급 ${latestDate([flow.foreign[0],...flow.domestic])} · 수탁고 ${latestDate(holdings.slice(1))}`;
-  root.querySelector('#mr-content').innerHTML=`<p class="note"><strong>${month} · ${r.partial?'월중 잠정':'월말'} 보고서</strong> · 조회 한도 ${r.end} · 국내 금리 민평 4사 · 금리 변동은 전월말 대비 bp, 선물 가격은 pt. 휴일·공표 시차가 있어 지표별 실제 관측일을 함께 표시합니다.</p>
+  root.querySelector('#mr-content').innerHTML=`<p class="note"><strong>${month} · ${r.partial?'월중 잠정':'월말'} 보고서</strong> · 마지막 거래일 기준 ${r.end} · 국내 금리 민평 4사 · 금리 변동은 전월말 대비 bp, 선물 가격은 pt. 달력 말일 대신 해당 월 마지막 거래일을 사용합니다. 휴일·공표 시차가 있어 지표별 실제 관측일을 함께 표시합니다.</p>
     <p class="hint monthly-status">${sourceStatus}</p><h2 class="section-title">국내 금리</h2>${domestic.html}<p class="hint">국채선물은 KRX 정규장 종가(인포맥스 경유 포함), 거래량 최대 종목 기준이며 계약 교체가 포함됩니다. 표의 실제 종목과 출처를 확인하세요.</p>
     <div class="monthly-grid">${chartBox('mr-curve','기간 스프레드 · 국고 10년−3년','금리 좌축 %, 스프레드 우축 bp · 최근 12개월')}${chartBox('mr-credit','크레딧 스프레드 · 은행채 AAA 3년−국고 3년','민평 4사 · 금리 좌축 %, 스프레드 우축 bp')}</div>
     <h2 class="section-title">해외 금리</h2>${overseas.html}<p class="hint">해외는 인포맥스 BID_Close 종가(%), 한국은 국내 표와 같은 민평 4사입니다. 현지 시장별 관측일이 다를 수 있습니다.</p>
