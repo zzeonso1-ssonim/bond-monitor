@@ -9,6 +9,18 @@ const CONCURRENCY = 8;
 
 const sinceISO = (days) => new Date(Date.now() - days * 86400 * 1000).toISOString().slice(0, 10);
 
+// Dedicated three-agency series for the supplied DDR5 reference chart.
+// Do not substitute the four-agency benchmark used by the other monitor tabs.
+export async function loadSemiconductorData() {
+  const [market, meta] = await Promise.all([
+    fetchPaged('market_daily?select=trade_date,symbol,value&symbol=in.(SEMI_DDR5_16G_SPOT,SEMI_GOVT3Y_AVG3)&order=trade_date.asc,symbol.asc'),
+    fetchPaged('web_meta?select=payload&key=eq.semiconductor-ddr5'),
+  ]);
+  const points = symbol => market.filter(r=>r.symbol===symbol).map(r=>({date:r.trade_date,value:r.value}));
+  return {prices:points('SEMI_DDR5_16G_SPOT'), yields:points('SEMI_GOVT3Y_AVG3'),
+    priceSource:meta[0]?.payload||{}, yieldSource:'연합인포맥스 4743 시가평가 3사 평균 국고채권 · BONDAVG01', receivedAt:new Date().toISOString()};
+}
+
 // 단일 페이지. wantCount 면 Content-Range 의 전체 건수(`0-999/278654`)도 함께 돌려준다.
 async function fetchRange(path, from, wantCount = false) {
   const headers = { ...HEADERS, Range: `${from}-${from + PAGE - 1}` };

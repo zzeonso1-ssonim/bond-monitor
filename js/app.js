@@ -1,3 +1,4 @@
+import { openSemiconductor } from './semiconductor.js';
 // 본드모니터 — 화면 로직 (순수 바닐라 ES 모듈, 외부 의존 없음)
 import {
   MONITOR_GROUPS, MATRIX_GROUPS, XCURVE_DEFS, RV_DEFS,
@@ -119,6 +120,7 @@ $("#tabs").addEventListener("click", (e) => {
   if (!btn) return;
   for (const t of document.querySelectorAll(".tab")) t.classList.toggle("active", t === btn);
   for (const v of document.querySelectorAll(".view")) v.classList.toggle("active", v.id === `view-${btn.dataset.view}`);
+  if (btn.dataset.view === 'semiconductor') openSemiconductor(document.querySelector('#view-semiconductor'));
   if (btn.dataset.view === 'monthly') openMonthlyReport(document.querySelector('#view-monthly'));
 });
 
@@ -2372,3 +2374,5 @@ async function main() {
 }
 main();
 if (location.hash === '#monthly') document.querySelector('[data-view="monthly"]').click();
+
+if (location.hash === '#semiconductor') document.querySelector('[data-view="semiconductor"]').click();
